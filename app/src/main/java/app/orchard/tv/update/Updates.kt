@@ -44,7 +44,7 @@ import java.net.URL
 object Updates {
     private const val TAG = "AerialUpdates"
     private const val PREFS = "updates"
-    private const val VERSION_URL = "https://aerial.qust.me/download/version.txt"
+    private const val VERSION_URL = "https://halfbilt.github.io/aerial-tv/version.txt"
     private const val CHECK_EVERY_MS = 3 * 60 * 60 * 1000L
     private const val RETRY_MS = 10 * 60 * 1000L
 
@@ -310,8 +310,8 @@ object Updates {
         }
         val name = "aerial-${BuildConfig.FLAVOR}.apk"
         val sources = listOf(
-            "https://aerial.qust.me/download/$name",
-            "https://github.com/pengchujin/aerial-tv/releases/latest/download/$name",
+            "https://halfbilt.github.io/aerial-tv/$name",
+            "https://cdn.jsdelivr.net/gh/HalfBilt/aerial-tv@release/$name",
         )
         for (url in sources) {
             val ok = runCatching { download(url, file) }

@@ -90,7 +90,12 @@ jobs:
       - name: publish to release branch
         run: |
           APK=app/build/outputs/apk/standard/release/app-standard-release.apk
-          VERSION=$(grep -m1 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([0-9.]+)".*/\1/')
+          # 只认带引号的赋值行：注释里提到 versionName 不会被当成版本号。
+          VERSION=$(grep -m1 -E '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"' app/build.gradle.kts | sed -E 's/.*"([0-9][0-9.]*)".*/\1/')
+          case "$VERSION" in
+            [0-9]*) ;;
+            *) echo "::error::抓不到版本号（得到 '$VERSION'）"; exit 1 ;;
+          esac
           test -s "$APK" || { echo "::error::APK 没生成"; exit 1; }
           # Keep the APK outside the repo: the orphan switch below clears the working tree.
           cp "$APK" /tmp/aerial-release.apk

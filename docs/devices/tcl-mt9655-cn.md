@@ -75,7 +75,7 @@ HTTP 服务日志里完全没有来自电视的请求（本机 macOS 防火墙�
 
 ## 仍未解决
 
-无障碍入口被固件删除 ⇒ 无法手动开启「Aerial 桌面守护」；ADB 又是 TLS-only 且无授权通道 ⇒ 死锁。
+无障碍入口被固件删除 ⇒ 无法手动开启「Aerial 桌面守护」；无线 ADB 是 TLS-only 且没有配对入口，只能先走有线 adb 授权（见下面「用户找到的办法」）。
 现状：Aerial 只能当普通 App 用（点图标进，按 HOME 回 TCL 桌面）。
 
 已试过且**无效**的手段（避免重复排查）：
@@ -89,6 +89,8 @@ HTTP 服务日志里完全没有来自电视的请求（本机 macOS 防火墙�
 ## 用户找到的办法：有线 adb（2026-10，#52 #588）
 
 - 鹤 6 Ultra（Android 14）上几位用 **USB A 对 A 线**把电视的 USB 口接到电脑，先走有线 adb，电视上能弹出授权；授权后无线 adb 也能用（断电后要重新接线）。
+- 接口有讲究（cleanyourtv 的 `docs/devices/tcl-mt9655-cn-android14.md`，MT9655_4K_CN，2026-10-21 实测）：电脑那头插 **USB 3.0** 口，电视那头插 **USB 2.0** 口；ADB 开关要一直开着。电视插错口或用了只能充电的线，电脑上什么设备都不出现，很容易误判成「没有 USB ADB」。Windows 上能识别出 `USB\VID_18D1&PID_4EE7`。授权后执行 `adb tcpip 5555`，重启后要重新接线再执行一次。
+- 安装策略可以直接读出来：`content query --uri content://com.tcl.providers.config/all | grep InstallConfig`。`launcherStrategy` 开着、名单为空时，带 HOME 的包会被拒，只能装 `guard` 版。这一行 shell 改不了（`content update` 返回 0，不生效）。
 - 有了 adb，部分固件的无障碍仍然打不开（设置写进去不生效），守护起不来，只能当普通 App 用。
 - #588 停用「软件包安装程序」后装上 standard 版并设成默认桌面，主页键能回 Aerial，开机仍先进原桌面。**停用安装程序有变砖风险，装完必须马上启用**，官方流程不推荐。
 

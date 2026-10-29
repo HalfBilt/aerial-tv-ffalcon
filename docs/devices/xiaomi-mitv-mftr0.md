@@ -9,7 +9,10 @@
 ## HOME 锁定
 
 - `cmd role add-role-holder android.app.role.HOME app.orchard.tv` 和 `cmd package set-home-activity` 都返回成功，但 `resolve-activity` 仍然返回 `com.mitv.tvhome`。
-- 原因：`com.android.server.pm.MitvSettings.isThirdpartyHomeAllowed(pkg)` → `isAppInWhitelistWithFlag(pkg, 4)`。白名单来自 `/data/system/mitv_features.xml` 和 `persist.appcontrol_*` 属性，只有系统进程能写。
+- 原因：`com.android.server.pm.MitvSettings.isThirdpartyHomeAllowed(pkg)` → `isAppInWhitelistWithFlag(pkg, 4)`。白名单来自 `/data/system/mitv_security_center.xml`（system 0600，shell 读不了，由云控下发）和 `persist.appcontrol_*` 属性，只有系统进程能写。
+- 白名单的内容开机时会打到日志里：重启后马上执行 `logcat -d -s MitvConfigParser`，看 `[White] 包名=标志` 这几行（日志缓冲很快会被覆盖）。2026-10-29 在 OS3.0.101 上读到 127 条白名单、54 条黑名单，其中带 HOME 位（4）的有 42 个，不含 `app.orchard.tv`。像第三方桌面的有：`com.ts.launcher`、`com.thunderstone.idun(.dev)`、`com.tongshi.home`、`com.bytv.launcher(.special)`、`com.meituan.retail.launcher`，都是 511。当贝桌面 `com.dangbei.tvlauncher` 在黑名单里。带待机免杀位（`0x8000`）的只有 `com.tencent.qqmusictv` 和 `com.xiaomi.mitv.light`。
+- cleanyourtv 的记录（AETP0、MTEQ0、Redmi MTTP0 等，Android 9/10）：用白名单里的包名重新编译后，不停用 PatchWall 也能设为 HOME。在 HyperOS 3 上（ASTR0、MFFU0，以及其他几台 MFTR0）也能接管，但必须先停用 `com.mitv.tvhome`，否则会弹出桌面选择框。这些包名属于别的公司，而且换包名等于装一个新 App，户主数据和授权都要重来，所以 Aerial 没有采用。
+- 2026-10-29 在这台上试过（OS3.0.101，不停用 PatchWall）：把 Aerial 编成 `com.ts.launcher` 装上后，`query-activities` 能列出它，普通的 `app.orchard.tv` 也在列表里。但 `set-home-activity` 和 HOME 角色照样被拒，日志 `addPreferredActivity: Don't set 3-app default home`。HOME 的解析结果从 PatchWall 变成了 `ResolverActivity`（桌面选择框）：白名单包名被留作候选，可是设不成默认。选择框里点「始终」能不能记住，没有试（要按实体遥控器）。试完已卸掉测试包，HOME 角色改回 `app.orchard.tv`，解析回到 PatchWall。
 - **不要停用 `com.mitv.tvhome`**：停用后 HOME 解析到 FallbackHome，而 FallbackHome 也不认第三方 HOME，会一直黑屏并刷日志「User unlocked but no home」。实测过，之后已立即 `pm enable` 还原。
 - 解决办法：桌面守护（无障碍）。原桌面一到前台就切回 Aerial；按 HOME 时实测从按下到 Aerial 显示约 0.5 秒，中间会闪一下原桌面。
 - 1.11 之前守护服务一直开着按键过滤（`flagRequestFilterKeyEvents`），在系统之前拦 HOME，不闪原桌面。但这样所有按键都要先绕道 Aerial，用户反馈云视听小电视里按一次遥控器移动两格，卸载 Aerial 就好。现在只在用户从「桌面」磁贴主动进入原桌面时才开过滤（`HomeGuardService.filterKeys`），回到 Aerial 或打开别的 App 就关掉。用 `dumpsys accessibility` 看：平时没有 `A11yInputFilter`，在原桌面里是 `[KeyboardInterceptor]`。

@@ -17,6 +17,7 @@ object BootOpen {
     private const val OPENED_BOOT = "boot_open_boot"
     private const val SCREEN_OFF_ELAPSED = "screen_off_elapsed"
     private const val SCREEN_OFF_BOOT = "screen_off_boot"
+    private const val OPENED_ASLEEP = "boot_open_asleep"
 
     /** When this boot began by the wall clock, to tell a stored time of this boot from one before. */
     private fun bootStamp(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
@@ -35,17 +36,33 @@ object BootOpen {
     fun noteOpened(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putLong(OPENED_ELAPSED, SystemClock.elapsedRealtime()).putLong(OPENED_BOOT, bootStamp())
+                .putLong(OPENED_ASLEEP, asleep())
         }
     }
 
-    /** False when the target was opened in this boot and the screen has not gone off since. */
+    /** How long this boot has spent suspended: uptime stops in deep sleep, elapsed time does not. */
+    private fun asleep(): Long = SystemClock.elapsedRealtime() - SystemClock.uptimeMillis()
+
+    /**
+     * Whether the TV was suspended since [openedAsleep] was read (a standby, then a wake). Xiaomi
+     * MiTV-MFTR0 (Android 14) stops Aerial during standby, so the screen-off broadcast that marks a
+     * wake never reached it, and the app to start on opened at power-on only, never after standby
+     * (PR #881, by xutaocn, found on that TV). The time asleep is counted by the kernel, whoever
+     * was running. A few seconds of suspend with the screen on are not a standby.
+     */
+    internal fun sleptSince(openedAsleep: Long, asleepNow: Long): Boolean =
+        openedAsleep >= 0 && asleepNow - openedAsleep > SLEPT_MS
+
+    /** False when the target was opened in this boot and the TV has not gone to standby since. */
     fun due(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val opened = prefs.getLong(OPENED_ELAPSED, -1L)
         if (opened < 0 || !thisBoot(opened, prefs.getLong(OPENED_BOOT, 0L))) return true
+        if (sleptSince(prefs.getLong(OPENED_ASLEEP, -1L), asleep())) return true
         val off = prefs.getLong(SCREEN_OFF_ELAPSED, -1L)
         return off >= 0 && thisBoot(off, prefs.getLong(SCREEN_OFF_BOOT, 0L)) && off > opened
     }
 
     private const val SAME_BOOT_SLACK_MS = 2 * 60 * 1000L
+    private const val SLEPT_MS = 30_000L
 }

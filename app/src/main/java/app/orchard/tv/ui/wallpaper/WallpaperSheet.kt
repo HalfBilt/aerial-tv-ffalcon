@@ -49,12 +49,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -396,7 +398,14 @@ private fun WallpaperRows(takeFocus: Boolean) {
     // A row clips to its bounds, and the focused card grows by 8%: room on the left for that,
     // with the row moved back by as much so the cards still line up with the titles.
     LazyRow(
-        modifier = Modifier.offset(x = (-10).dp),
+        modifier = Modifier.offset(x = (-10).dp).drawWithContent {
+            // Keep the cards out of the phone column on old GPUs (#557), independently of the
+            // scroll layer's clip. Leave vertical room for the focused card's 8% zoom.
+            val focusRoom = 16.dp.toPx()
+            clipRect(top = -focusRoom, bottom = size.height + focusRoom) {
+                this@drawWithContent.drawContent()
+            }
+        },
         horizontalArrangement = Arrangement.spacedBy(18.dp),
         contentPadding = PaddingValues(start = 14.dp, end = 24.dp, top = 6.dp, bottom = 4.dp),
     ) {

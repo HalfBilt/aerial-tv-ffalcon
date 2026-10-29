@@ -44,9 +44,11 @@
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
             tools:ignore="UnusedAttribute">
+            <!-- CVTE firmware sends Home as MAIN + HOME + COMMON_HOME; same filter as the full app's. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.COMMON_HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <intent-filter>

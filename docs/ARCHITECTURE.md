@@ -207,6 +207,8 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 - ADB：`ConfigReceiver --es device_profile '<json>'`（`default` 回到内置），`--ez list_sources true` 以 JSON 列出信号源（含隐藏的、硬件编号、固件名、小米编号），`--es open_source <id>` 按磁贴的方式打开一个信号源。通过 `adb shell` 传带空格的 JSON 时，整条命令要放进一对引号里（`adb shell "am broadcast … --es device_profile '{\"6\":…}'"`），否则远端 shell 会吃掉引号。
 - 诊断报告末尾的 **Device profile** 一节输出当前生效的 JSON 和来源（`BuiltIn` / `ThisTv` / `None`）；手机页「去 GitHub 反馈」预填型号、版本，来源是 `ThisTv` 时把那段 JSON 填进 issue 表单的 `profile` 字段（GitHub 表单支持按字段 id 用 URL 参数预填），诊断全文复制到剪贴板。
 
+`bootStockMs`（#902，微鲸 WTV43K1J）：开机时守护先让原厂桌面在前台露出来，从它的窗口事件算起这么多毫秒后再接管（没有窗口事件最多等 20 秒），给要靠原厂桌面露脸才结束开机的固件用。
+
 收到这类 issue：把 JSON 加进 `devices.json`（`models` 填上同型号的两种写法，比如 `MiTV-XXXX0` 和 `MiTV_XXXX0`，`note` 写 issue 号），`DeviceProfileTest` 跑一遍。
 
 适配流程给 Agent 的说明在 `site/adapt.md`（英文 `site/en/adapt.md`）：`tools/report.sh` 收集、`tools/selftest.sh` 实测（主页键、从别的 App 回来，可选待机、重启、逐个打开信号源并截图，最后一段 JSON 结果），按失败项试开关，整理成报告，用户同意后用 `gh issue create` 或预填表单提交。
@@ -222,6 +224,8 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 ## 开机信号源
 
 控制中心 → 信号源 → 信号源设置 →「开机时打开」（`AerialSettings.bootSource`，issue #25）。也可以开机打开一个 App（`AerialSettings.bootApp`，按包名，比如直播 App，一般会接着播上次的频道）：在主屏幕长按 App 或信号源磁贴，选「开机时打开」，再选一次是「开机时不再打开」；两者只能有一个，信号源设置页里选了 App 时显示在列表里，选「不打开」清除。设了开机打开的对象时，控制中心主页「个性化」下面多一行「开机时打开 ……›」，点进信号源设置。每次选择、更换、取消，屏幕顶部都出现一条玻璃提示，4 秒后消失（`HomeViewModel.chooseBootTarget` / `notify`，`Overlays.NoticeBanner`），更换时写明换掉的是哪个。国内电视的「开机」大多是从待机唤醒，所以三条路径都会触发 `MainActivity.openBootSource`：真重启后第一次启动（按 `Settings.Global.BOOT_COUNT` 每次开机只开一次）；守护在亮屏、复活或开机后把 Aerial 拉回前台时带上 `EXTRA_WOKE`（Aerial 被杀掉的小米）；Aerial 本来就在前台时自己收到的亮屏广播（TCL）。15 秒内重复触发只开一次。另外每次开机、每次唤醒（中间屏幕关过）最多开一次（`system/BootOpen.kt`，#766）：打开的时间和最近一次息屏（MainActivity 和守护都记）存在 `system` 偏好里，按开机时刻（墙钟 − elapsedRealtime，允许 2 分钟误差）区分是不是这次开机；酷开杀掉 Aerial 后从 App 回来是冷启动，守护又当成唤醒，以前会再开一次，形成循环。Lite 只按开机记。如果唤醒时 CEC 已经切到了某个信号源，守护不会拉回 Aerial，这一次也就不再打开设定的信号源。
+
+「每次开机 / 每次唤醒打开一次」由 `BootOpen` 判断：打开时记下 elapsed 时间和「这次开机累计休眠了多久」（elapsedRealtime − uptimeMillis）。之后关过屏（收到 SCREEN_OFF），或者累计休眠多了 30 秒以上（深度待机，小米 MFTR0 待机时 Aerial 被结束、收不到关屏广播，PR #881），就算又到期了。
 
 ## 遥控器按键
 
@@ -262,6 +266,7 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 被杀（小米待机 killAllThirdApp）：系统移除无障碍授权
   → 通知监听绑定断开 → 系统约 0.5 秒后重绑 RevivalListener（进程复活）
   → GuardSetup.ensureEnabled() → 守护重新启用 → onServiceConnected 判断为「刚被复活」→ 打开 Aerial
+  （例外，#845：Aerial 死的时候不在前台、又没有用量统计权限、不在开机窗口内 → 当成用户在看别的 App，不动）
 ```
 
 通知服务的启动恢复不只依赖 `onListenerConnected`：`RevivalListener.onCreate` 也启动有限次数的检查，在服务创建后约 5、10、20、35、65、125 秒检查用户是否解锁、守护是否绑定，最后再等 5 秒确认。已绑定就停止；尚未解锁只等待，不读凭据存储；解锁广播即使丢失也会由下一次检查发现。重绑复用 `GuardSetup.rebindIfStalled`，保留其他无障碍服务，并遵守 `guard_off_in_standby`。窗口耗尽后不再轮询；较晚才收到解锁或通知连接回调时可以启动新窗口。服务销毁取消尚未执行的检查。
@@ -276,7 +281,7 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 
 ## 系统能力（system/）
 
-- **信号源**：`TvInputManager` 列出直通输入和调谐器。装了 `com.xiaomi.mitv.tvplayer` 的走小米的 Intent（HDMI 的 `input = HW 编号 + 18`，AV=2，ATV/DTMB 各自的 Activity），否则走 `TvContract` 的通用 URI。CEC 子输入的名字用于显示设备名，`Playback_1` 这类通用名会被过滤。`DeviceProfile` 存放按机型的修正，见下面「机型修正」。
+- **信号源**：`TvInputManager` 列出直通输入和调谐器（调谐器只认系统包的：VLC 给预览频道注册的调谐器类输入不算，#882）。小米电视（不含 `ro.build.characteristics` 带 stb / mbx 的盒子）系统一个 HDMI 都没列时，用小米播放器补 HDMI 1–3（MiTV4C 两个），编号先读 `hdmiN_order`，没有就 22 + 口号，id 仍是 `xiaomi:<编号>`（#874 #599）。装了 `com.xiaomi.mitv.tvplayer` 的走小米的 Intent（HDMI 的 `input = HW 编号 + 18`，AV=2，ATV/DTMB 各自的 Activity），否则走 `TvContract` 的通用 URI。CEC 子输入的名字用于显示设备名，`Playback_1` 这类通用名会被过滤。`DeviceProfile` 存放按机型的修正，见下面「机型修正」。
 - **网络设置入口**：海信的 `com.android.tv.settings/com.hisense.systemsettings.MainActivity`
   存在、启用且导出时，优先用 `ACTION_WIFI_SETTINGS` 打开海信自己的 Wi-Fi 页，避开固件残留的
   Android TV 网络页（#760，H55E9A / Android 8）。其他电视的原有候选顺序和完整版的失败回退不变，

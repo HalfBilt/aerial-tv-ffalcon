@@ -56,6 +56,7 @@ import app.orchard.tv.apps.TileArtFactory
 import app.orchard.tv.guard.GuardSetup
 import app.orchard.tv.guard.HomeGuardService
 import app.orchard.tv.ui.home.HomeScreen
+import app.orchard.tv.ui.home.AerialStart
 import app.orchard.tv.ui.home.LiveFilm
 import app.orchard.tv.ui.home.asFocusedTile
 import app.orchard.tv.ui.theme.LocalReducedMotion
@@ -495,6 +496,11 @@ class MainActivity : ComponentActivity() {
     private val idleHandler = Handler(Looper.getMainLooper())
     private val showScreensaver = Runnable { startScreensaver(asked = false) }
 
+    /** The Dolby Vision screensaver's start, fetched to disk while Home is still up (AerialStart.prepareAhead). */
+    private val prepareScreensaver = Runnable {
+        if (vm.resumed && !vm.screensaverVisible) lifecycleScope.launch { AerialStart.prepareAhead(this@MainActivity, SAVER_AHEAD_MS) }
+    }
+
     /** Home's bounce did not bring Aerial back in time: the film lets its decoder go as usual. */
     private val endHomeBounce = Runnable {
         if (vm.homeBounce) DiagLog.i("not back from Home's bounce; the film lets go")
@@ -574,8 +580,11 @@ class MainActivity : ComponentActivity() {
     private fun restartIdleTimer() {
         vm.lastInputAt = SystemClock.uptimeMillis()
         idleHandler.removeCallbacks(showScreensaver)
+        idleHandler.removeCallbacks(prepareScreensaver)
         if (AerialSettings.screensaverMinutes != AerialSettings.NEVER) {
-            idleHandler.postDelayed(showScreensaver, idleBeforeScreensaver())
+            val idle = idleBeforeScreensaver()
+            idleHandler.postDelayed(showScreensaver, idle)
+            if (idle > SAVER_AHEAD_MS) idleHandler.postDelayed(prepareScreensaver, idle - SAVER_AHEAD_MS)
             if (holdsOffTheDream() && window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON == 0) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
@@ -867,6 +876,12 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** How long the film waits for Aerial to come back from Home's bounce (MFTR0: 120-290 ms). */
         private const val HOME_BOUNCE_MS = 500L
+
+        /**
+         * How long before the screensaver its start is fetched: the moment's 6 MB took 1-2 s from
+         * Apple on Xiaomi MiTV-MFTR0, after the index.
+         */
+        private const val SAVER_AHEAD_MS = 8_000L
 
         /** The system's dream did not show when asked (see dreamCheck); for this process. */
         private var dreamFails = false

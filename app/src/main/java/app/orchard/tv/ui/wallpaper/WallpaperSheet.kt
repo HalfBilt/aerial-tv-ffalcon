@@ -14,6 +14,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewResponder
+import androidx.compose.foundation.relocation.bringIntoViewResponder
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +85,8 @@ import app.orchard.tv.ui.theme.Type
 import app.orchard.tv.wallpaper.PhoneServer
 import app.orchard.tv.wallpaper.AerialFormats
 import app.orchard.tv.wallpaper.AerialQuality
+import app.orchard.tv.wallpaper.AerialSet
+import app.orchard.tv.wallpaper.AerialStream
 import app.orchard.tv.wallpaper.ScreensaverMode
 import app.orchard.tv.system.SystemScreensaver
 import app.orchard.tv.wallpaper.Wallpaper
@@ -276,8 +283,16 @@ fun WallpaperSheet(
                     // Only the qualities this TV can play; a 1080p-only TV has nothing to choose.
                     val qualities = remember { AerialFormats.supported(context) }
                     if (qualities.size > 1) {
+                        // The films kept on the TV (AerialSet, AerialStream): how many, how much
+                        // space at most, and how they change. In place of the quality's own note,
+                        // as a note shows two lines at most.
+                        val keeps = stringResource(
+                            R.string.ss_aerial_keeps,
+                            remember { android.text.format.Formatter.formatShortFileSize(context, AerialStream.keepLimit(context)) },
+                            AerialSet.MAX,
+                        )
                         Choices(
-                            R.string.ss_quality, stringResource(R.string.ss_quality_hint), note,
+                            R.string.ss_quality, keeps, note,
                             listOf(AerialQuality.Auto to R.string.ss_quality_auto, AerialQuality.Hd to R.string.ss_quality_hd) +
                                 listOf(AerialQuality.Uhd to R.string.ss_quality_uhd, AerialQuality.DolbyVision to R.string.ss_quality_dv)
                                     .filter { it.first in qualities },
@@ -493,16 +508,33 @@ private fun SectionTitle(title: Int) {
 private fun Group(note: String? = null, rows: @Composable ColumnScope.(note: (String?) -> Unit) -> Unit) {
     var focusedNote by remember { mutableStateOf<String?>(null) }
     var inside by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .onFocusChanged { inside = it.hasFocus },
-    ) { rows { focusedNote = it } }
-    Box(Modifier.height(38.dp).padding(start = 16.dp, top = 7.dp)) {
-        (if (inside) focusedNote ?: note else note)?.let {
-            BasicText(it, style = Type.Caption.copy(color = Palette.TertiaryLabel), maxLines = 2, overflow = TextOverflow.Ellipsis)
+    var height by remember { mutableStateOf(0f) }
+    // A focused row asks the sheet to show it from its top down to the group's note: the
+    // screensaver's group sits at the sheet's bottom, and showing the row alone (on TV, Compose
+    // keeps a focused row about a third down) left the quality's note below the screen. One
+    // request, so the sheet scrolls once; a second scroll after the focus's own made the sheet
+    // jump back and forth on every press (TCL MT5879).
+    val withNote = remember {
+        @OptIn(ExperimentalFoundationApi::class)
+        object : BringIntoViewResponder {
+            override fun calculateRectForParent(localRect: Rect) =
+                Rect(localRect.left, localRect.top, localRect.right, maxOf(localRect.bottom, height))
+            override suspend fun bringChildIntoView(localRect: () -> Rect?) {}
+        }
+    }
+    @OptIn(ExperimentalFoundationApi::class)
+    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height.toFloat() }.bringIntoViewResponder(withNote)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.05f))
+                .onFocusChanged { inside = it.hasFocus },
+        ) { rows { focusedNote = it } }
+        Box(Modifier.height(38.dp).padding(start = 16.dp, top = 7.dp)) {
+            (if (inside) focusedNote ?: note else note)?.let {
+                BasicText(it, style = Type.Caption.copy(color = Palette.TertiaryLabel), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

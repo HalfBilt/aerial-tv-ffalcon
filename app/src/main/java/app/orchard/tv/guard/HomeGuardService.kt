@@ -34,6 +34,7 @@ import app.orchard.tv.MainActivity
 import app.orchard.tv.dream.AerialDream
 import app.orchard.tv.settings.AerialSettings
 import app.orchard.tv.system.BootOpen
+import app.orchard.tv.system.DiagLog
 import app.orchard.tv.system.SystemProbe
 
 /**
@@ -472,6 +473,18 @@ class HomeGuardService : AccessibilityService() {
         // (TCL MT5879, after the screensaver crash of 1.14). Updates count too: Aerial was in front.
         val diedInFront = GuardSetup.wasHomeInFront(this) &&
             (Build.VERSION.SDK_INT < 24 || SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime() < 60_000)
+        // Killed in the background while the viewer was in an app, and taken off the accessibility
+        // list with it, so that putting it back counts as revived: with no usage stats to ask, the
+        // unknown front was taken for the stock launcher, and Aerial came up over the video every
+        // few minutes (XGIMI MT9660, Android 13, fongmi; issue #845, from Aerial's own log). Aerial
+        // was not on screen when it died, so an app is what is in front.
+        if (revived && !diedInFront && !GuardSetup.wasHomeInFront(this) && !usageStatsAllowed(this) &&
+            SystemClock.elapsedRealtime() >= BOOT_WINDOW_MS && !fastBootTakeOver
+        ) {
+            // In Aerial's own diagnostics too: on these TVs the owner often cannot read logcat.
+            DiagLog.i("guard: re-enabled after being switched off, with an app in front when Aerial died; leaving it")
+            return
+        }
         // Revived with the screen off (standby): the screen-on check takes over at wake.
         // Not gated on being the default Home: Skyworth/Coolita (8R145, Android 11) starts its own
         // launcher at boot whatever Home resolves to (issue #43). The take-over looks first, and
@@ -559,6 +572,7 @@ class HomeGuardService : AccessibilityService() {
         if (!stockInFront && last != null) Log.i(TAG, "$reason with ${last.first} in front; leaving it there")
         if (!stockInFront || SystemClock.uptimeMillis() < allowStockUntil) return
         Log.i(TAG, "$reason with the stock launcher in front; bringing Aerial back")
+        DiagLog.i("guard: $reason, front ${last?.first ?: "unknown"}; bringing Aerial back")
         goHome(woke)
     }
 

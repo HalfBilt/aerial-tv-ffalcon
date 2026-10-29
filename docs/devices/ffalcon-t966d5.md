@@ -24,3 +24,12 @@ adb shell settings put system boot_app_componentname com.tcl.cyberui/.MainActivi
 ```
 
 报告人连续重启 3 次，开机 26 秒内前台都是 Aerial，之后没被打回。主页键仍然回 TCL 桌面（守护被清）。
+
+## 雷鸟鹤 6 Ultra 2027 款 85 英寸（同为 T966D5 / AU01，#885）
+
+报告人 2026-10-29 用 1.69 standard 跑完 `selftest.sh STANDBY=1 REBOOT=1 INPUTS=1`，全部通过：
+
+- Aerial 是默认 HOME（`role holder: app.orchard.tv`，`resolve-activity` 解析到 Aerial），守护绑着，**没有**出现上面每 52 秒被清的情况。主页键从 App 回来 0.9 秒，待机唤醒 0.7 秒，重启后 2 秒采样就是 Aerial。
+- 信号源 7 个（HDMI 1–4 = HW15–18、TV = HW2、AV = HW3、USB）都走 `com.tcl.tv/.TVActivity`（USB 走媒体中心），报告人确认画面对应正确，不用设备配置。
+- 安装：普通 `adb install` 同样被拒；报告人临时改了 TCL 的桌面安装校验，用多屏互动推送装上后又改回了原样（细节在 #885，我们没有验证，也不建议照做）。
+- 和 #817 那台差在哪里没查清：同一个 device 和固件号，一台能当默认 HOME、一台守护被清。单台结果，长期是否稳定没有验证。

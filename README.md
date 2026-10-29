@@ -221,7 +221,7 @@ curl -fsSL https://aerial.qust.me/install.sh | TV=192.168.1.20 bash -s restore
 | 雷鸟 | 55S595C Ultra、鹤 6 2025 Ultra | Android 11+ | ❌ 能装，接管不了主页键（[笔记](docs/devices/tcl-mt9655-cn.md)） |
 | 索尼 | A80J 国行、BRAVIA VH1 | Android 10 / 12 | ✅ |
 | 索尼 | KD55X7000D 国行 | Android 8 | ✅ 亮度要在电视设置里调（[#757](https://github.com/pengchujin/aerial-tv/issues/757)） |
-| 创维 / 酷开 | K3 Pro、75A7D | Android 11 | ✅ 75A7D 的信号源 1.45 起能用 |
+| 创维 / 酷开 | K3 Pro、75A7D | Android 11 | ✅ 75A7D 的信号源 1.45 起能用；开机先出酷开桌面 3–6 秒，报告人改固件属性后开机直达（[#894](https://github.com/pengchujin/aerial-tv/issues/894)） |
 | 创维 / 酷开 | 65G60、8R134 / 8R145、aigc 系（C10 投影、P60、7T863） | Android 8–11 | ⚠️ 开机先进酷开桌面，或被系统清理后要等 20–30 秒（[笔记](docs/devices/skyworth-coocaa.md)） |
 | 创维 / 酷开 | 5S21（50K2、7626K2）、5S05（60U2）、8H66 H7 | Android 5.x | ⚠️ 开机和待机后是 Aerial，主页键回不到 Aerial；信号源列不出来 |
 | 创维 / 酷开 | 8H57_H5 | Android 5.1 | ⚠️ 开机先转圈十几秒才进 Aerial（[#785](https://github.com/pengchujin/aerial-tv/issues/785)） |
@@ -236,6 +236,7 @@ curl -fsSL https://aerial.qust.me/install.sh | TV=192.168.1.20 bash -s restore
 | 海信 | 65E52D | Android 8 | ✅ 开机直接进 Aerial（[#672](https://github.com/pengchujin/aerial-tv/issues/672)） |
 | 海信 | 75E3F（VIDAA_TV，n62016） | Android 9 | ✅ 开机直接进 Aerial（[#847](https://github.com/pengchujin/aerial-tv/issues/847)） |
 | 海信 | E5Q Pro | Android 11 | ✅（[#790](https://github.com/pengchujin/aerial-tv/issues/790)） |
+| 海信 | 85U7G-PRO（MT9652） | Android 9 | ✅ APK 装完第一次按主页键选 Aerial、「始终」，开机直接进 Aerial，不用 ADB（[#886](https://github.com/pengchujin/aerial-tv/issues/886)） |
 | 海信 | VIDAA_TV（MSD6A348） | Android 4.4 | ✅ Aerial Lite，U 盘安装，主页键选「始终」即可；亮度调不了（[#769](https://github.com/pengchujin/aerial-tv/issues/769)） |
 | 夏普 | LCD-50SU671A | Android 6 | ✅ 要用 QuickShortcutMaker 打开 ADB |
 | OPPO | K9 | Android 9 | ⚠️ 要改包名才能装（[笔记](docs/devices/oppo-coloros-tv.md)） |
@@ -253,6 +254,7 @@ curl -fsSL https://aerial.qust.me/install.sh | TV=192.168.1.20 bash -s restore
 | 爱普生 | DTP9733 投影仪 | Android 11 | ✅ |
 | 志影 / 喜瑞 | HS350 投影仪（海思，YunOS） | Android 9 | ⚠️ 固件强停退到后台的第三方 App，从别的 App 按主页键要 10–30 秒才回 Aerial；不是用安装脚本装的要补两条授权（[#853](https://github.com/pengchujin/aerial-tv/issues/853)） |
 | 其他盒子 | CM311-1（改版 ATV）、PPTV K55U27、HK1 Box（S905X3） | Android 9 | ✅ HK1 Box 设成默认桌面即可（[#838](https://github.com/pengchujin/aerial-tv/issues/838)） |
+| 斐讯 | T1 盒子（S912） | Android 7.1.2 | ✅ 第一排往下进全部 App 时有点卡，可在 个性化 → 效果 选「流畅」（[#876](https://github.com/pengchujin/aerial-tv/issues/876)） |
 
 - **Android 4.0–4.4**：用 [Aerial Lite](#lite)（第一版，测试版）。
 - **不支持**：LG webOS、三星 Tizen、华为鸿蒙智慧屏，以及 Android 4.0 以前的系统。

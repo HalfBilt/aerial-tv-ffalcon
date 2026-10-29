@@ -223,7 +223,7 @@ Most TVs sold in China only accept their own home screen and clear third-party a
 | FFALCON | 55S595C Ultra, Crane 6 2025 Ultra | Android 11+ | ❌ Installs, can't take over Home ([notes](docs/devices/tcl-mt9655-cn.md)) |
 | Sony | A80J (China), BRAVIA VH1 | Android 10 / 12 | ✅ |
 | Sony | KD55X7000D (China) | Android 8 | ✅ Brightness only in the TV's own settings ([#757](https://github.com/pengchujin/aerial-tv/issues/757)) |
-| Skyworth / Coocaa | K3 Pro, 75A7D | Android 11 | ✅ 75A7D inputs work from 1.45 |
+| Skyworth / Coocaa | K3 Pro, 75A7D | Android 11 | ✅ 75A7D inputs work from 1.45; at power-on Coocaa's launcher shows for 3–6 s, which the reporter removed by changing firmware properties ([#894](https://github.com/pengchujin/aerial-tv/issues/894)) |
 | Skyworth / Coocaa | 65G60, 8R134 / 8R145, aigc models (C10 projector, P60, 7T863) | Android 8–11 | ⚠️ Boots into Coocaa's home first, or takes 20–30 s to come back after the system clears it ([notes](docs/devices/skyworth-coocaa.md)) |
 | Skyworth / Coocaa | 5S21 (50K2, 7626K2), 5S05 (60U2), 8H66 H7 | Android 5.x | ⚠️ Aerial after boot and standby, but Home does not return to it; no inputs listed |
 | Skyworth / Coocaa | 8H57_H5 | Android 5.1 | ⚠️ Spins for a dozen seconds at boot before Aerial ([#785](https://github.com/pengchujin/aerial-tv/issues/785)) |
@@ -238,6 +238,7 @@ Most TVs sold in China only accept their own home screen and clear third-party a
 | Hisense | 65E52D | Android 8 | ✅ Boots straight into Aerial ([#672](https://github.com/pengchujin/aerial-tv/issues/672)) |
 | Hisense | 75E3F (VIDAA_TV, n62016) | Android 9 | ✅ Boots straight into Aerial ([#847](https://github.com/pengchujin/aerial-tv/issues/847)) |
 | Hisense | E5Q Pro | Android 11 | ✅ ([#790](https://github.com/pengchujin/aerial-tv/issues/790)) |
+| Hisense | 85U7G-PRO (MT9652) | Android 9 | ✅ After installing the APK, the first Home press offers Aerial; pick it and "Always", and the TV boots into Aerial without ADB ([#886](https://github.com/pengchujin/aerial-tv/issues/886)) |
 | Hisense | VIDAA_TV (MSD6A348) | Android 4.4 | ✅ Aerial Lite from a USB drive; pick it with "Always" at the Home prompt; no brightness ([#769](https://github.com/pengchujin/aerial-tv/issues/769)) |
 | Sharp | LCD-50SU671A | Android 6 | ✅ Needs QuickShortcutMaker to open ADB |
 | OPPO | K9 | Android 9 | ⚠️ Needs a renamed package ([notes](docs/devices/oppo-coloros-tv.md)) |
@@ -255,6 +256,7 @@ Most TVs sold in China only accept their own home screen and clear third-party a
 | Epson | DTP9733 projector | Android 11 | ✅ |
 | ZHIYING / RIGAL | HS350 projector (HiSilicon, YunOS) | Android 9 | ⚠️ The firmware stops apps sent to the background; Home from another app takes 10–30 s back to Aerial; installed without the script it needs two grants ([#853](https://github.com/pengchujin/aerial-tv/issues/853)) |
 | Other boxes | CM311-1 (modified ATV), PPTV K55U27, HK1 Box (S905X3) | Android 9 | ✅ HK1 Box: set Aerial as the default home ([#838](https://github.com/pengchujin/aerial-tv/issues/838)) |
+| Phicomm | T1 box (S912) | Android 7.1.2 | ✅ Moving down from the first row into all apps stutters a little; Personalize → Effects → Smooth helps ([#876](https://github.com/pengchujin/aerial-tv/issues/876)) |
 
 - **Android 4.0–4.4**: [Aerial Lite](#lite) (first release, a beta).
 - **Not supported**: LG webOS, Samsung Tizen, Huawei Vision (HarmonyOS), and Android older than 4.0.

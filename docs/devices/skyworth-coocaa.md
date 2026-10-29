@@ -25,6 +25,13 @@ root 后把 `/system/pcfg/<型号目录>/config/general_config.xml` 里的 `DEFA
 - 遥控器信号源键：固件弹自己的 Quick Panel（`com.coocaa.os.ccosservice/com.coocaa.os.controlcenter.quicksettings.service.FeatureService`），同时把按键交给前台 App。有这个服务时 Aerial 不再响应信号源键，和 TCL 的 `tclInputPanel` 一样。
 - 亮度：`screen_brightness` 一直是 2/255，写它不改背光（画质中间件管）；`ACTION_DISPLAY_SETTINGS` 也解析不到。图像侧栏是启动 `com.skyworth.setting/.service.HalfScreenService`、带 `Key = "android.settings.PICTURE_SETTINGS"`（导出、无权限）。有这个服务时控制中心不画亮度滑条，改成打开它。两个包都要写进 `<queries>`。
 
+## 75A7D 开机先出酷开桌面：bootintent.xml 的 modelhome（#894，报告人实测，未合入）
+
+8R134_A7D（固件 `RP1A.200720.011` / `eng.www-da.20231205.132148`，Android 11，SELinux **permissive**）开机先出酷开桌面 3–6 秒。报告人查到原因：`services.jar` 在解析 HOME 之前按 `/system/ccos/etc/bootintent.xml` 选开机首页，其中 `modelhome` 一项在 `persist.service.model.pkg` / `persist.service.model.cls` 都非空时直接启动它们指向的组件；`com.tianci.system` 每次开机约 24 秒时把这两个属性清空。
+
+- 手动 `setprop` 这两个属性只管下一次开机。报告人的改法是 Aerial 每次开机后 30 秒用 `/system/bin/setprop` 写回（只在 bootintent.xml 有这一项时；enforcing 的固件写不进去），实测断电、重启都直接进 Aerial。
+- 没有合进 Aerial：要由 App 写固件的开机属性，卸载 Aerial 后下一次开机会指向不存在的组件，固件怎么处理没验证；`restore.sh` 也还不会清这两个属性。要不要做由户主决定。
+
 ## 75A7D 的信号源接口
 
 2026-10-24，报告人在 75A7D（`8R134_A7D`，RTD2885N，酷开 CCOS 9.0 / Android 11）上实测：

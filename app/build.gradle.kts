@@ -19,8 +19,8 @@ android {
         // 雷鸟/TCL 专用版（个人维护分支）。基线是上游 1.67（versionCode 81），
         // 我们自己的每次构建把版本号往后加：versionCode = 81xx，versionName = 1.67.x。
         // 这样既不和上游撞号，电视也能用自带检查器认出我们的新版本。
-        versionCode = 8101
-        versionName = "1.67.1"
+        versionCode = 8102
+        versionName = "1.67.2"
         // `./gradlew -Pdiag ...`: a build for one reporter's TV whose logcat shows no app lines;
         // see system/DiagLog.kt.
         val diag = project.hasProperty("diag")

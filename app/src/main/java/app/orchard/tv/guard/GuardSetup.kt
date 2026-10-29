@@ -17,6 +17,7 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import android.util.Log
+import app.orchard.tv.MainActivity
 import app.orchard.tv.dream.AerialDream
 import app.orchard.tv.system.SystemScreensaver
 
@@ -456,10 +457,43 @@ object GuardSetup {
     fun screensaverSettingChanged(context: Context) = keepScreensaver(context)
 
     /** Returns whether Home Guard had been switched off and was put back. */
+    /**
+     * TCL's boot policy beats the user's Home. The firmware patches
+     * RootWindowContainer.startHomeOnTaskDisplayArea to hand the first screen to
+     * TclBootAppManager, which starts Settings.System "boot_app_componentname" and never asks which
+     * Home is the default: on TCL MT5879 (Android 11) the log read
+     * "startBootApp entry reason:systemReady, startingPackageName:app.orchard.tv" followed by
+     * "TclBootAppPolicy: cmpName = com.tcl.cyberui/.MainActivity", so the firmware's own launcher
+     * was on screen for the four seconds before Aerial's process came up, even with Aerial set as
+     * the default Home (1.67, 2026-10-29).
+     *
+     * Pointed at Aerial, the policy answers "boot launcher, just use native process" and leaves the
+     * boot to the system's own Home resolution, which is Aerial and direct-boot aware: the kept
+     * backdrop is on screen before the unlock instead of the firmware's launcher, and cyberui never
+     * appears.
+     *
+     * Only where the value still names a TCL app or nothing: a viewer who picked another boot app
+     * keeps it. Written from ensureEnabled, which runs at boot and needs WRITE_SECURE_SETTINGS.
+     */
+    private fun keepBootApp(context: Context) {
+        if (Build.MANUFACTURER != "TCL") return
+        val resolver = context.contentResolver
+        val key = "boot_app_componentname"
+        val mine = ComponentName(context, MainActivity::class.java).flattenToString()
+        val current = runCatching { Settings.System.getString(resolver, key) }.getOrNull().orEmpty()
+        if (current == mine) return
+        if (current.isNotEmpty() && !current.startsWith("com.tcl.")) return
+        runCatching {
+            Settings.System.putString(resolver, key, mine)
+            Log.i(TAG, "TCL's boot app was '$current'; pointed it at Aerial")
+        }.onFailure { Log.w(TAG, "could not set TCL's boot app", it) }
+    }
+
     fun ensureEnabled(context: Context): Boolean {
         ensureAdb(context)
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return false
         keepScreensaver(context)
+        keepBootApp(context)
         RevivalSync.ensure(context)
         if (standingOut(context)) { watchScreenOn(context); return false }
         val me = ComponentName(context, HomeGuardService::class.java).flattenToString()

@@ -34,6 +34,7 @@ import app.orchard.tv.MainActivity
 import app.orchard.tv.dream.AerialDream
 import app.orchard.tv.settings.AerialSettings
 import app.orchard.tv.system.BootOpen
+import app.orchard.tv.system.DeviceProfile
 import app.orchard.tv.system.DiagLog
 import app.orchard.tv.system.SystemProbe
 
@@ -94,6 +95,20 @@ class HomeGuardService : AccessibilityService() {
     private var takeOverReason = ""
     private var takeOverOnWake = false
     private val takeOver = Runnable { takeOverIfStockHomeInFront(takeOverReason, takeOverOnWake) }
+
+    /**
+     * A profile's [DeviceProfile.bootStockMs]: at power-on the stock launcher is left in front
+     * until it has shown for that long (or, if it never says it showed, for [BOOT_STOCK_CAP_MS]).
+     */
+    private var bootStockHolding = false
+    private var bootStockShown = false
+    private val endBootStockHold = Runnable {
+        if (!bootStockHolding) return@Runnable
+        bootStockHolding = false
+        allowStockUntil = 0L
+        DiagLog.i("guard: stock launcher left on screen at boot (${if (bootStockShown) "it showed" else "it never said so"}); taking Home")
+        takeOverOnceSettled("after the stock launcher showed at boot", woke = true)
+    }
 
     /**
      * Mi TV 4 (MiTV4-ANSM0, Android 6.0.1) covers Aerial some 20 s into a boot with PatchWall's
@@ -414,6 +429,15 @@ class HomeGuardService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        // The profile is in credential storage: only once unlocked.
+        if (SystemClock.elapsedRealtime() < BOOT_WINDOW_MS && GuardSetup.isUserUnlocked(this) &&
+            DeviceProfile.current(this).bootStockMs > 0
+        ) {
+            bootStockHolding = true
+            allowStockUntil = SystemClock.uptimeMillis() + BOOT_STOCK_CAP_MS
+            handler.postDelayed(endBootStockHold, BOOT_STOCK_CAP_MS)
+            DiagLog.i("guard: bound at boot; leaving the stock launcher on screen first (device profile)")
+        }
         // Register before querying homes or checking the state so an unlock cannot be missed.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             registerReceiver(userUnlocked, IntentFilter(Intent.ACTION_USER_UNLOCKED))
@@ -936,6 +960,11 @@ class HomeGuardService : AccessibilityService() {
                 return
             }
             updateKeyFilter()
+            if (bootStockHolding && !bootStockShown && cls in stockHomes.getValue(pkg)) {
+                bootStockShown = true
+                handler.removeCallbacks(endBootStockHold)
+                handler.postDelayed(endBootStockHold, DeviceProfile.current(this).bootStockMs.toLong())
+            }
             // Only the stock launcher's home activity itself, not its dialogs or other screens.
             // Not gated on isDefaultHome(): see takeOverIfStockHomeInFront.
             if (cls !in stockHomes.getValue(pkg) || allowed) return
@@ -1145,6 +1174,7 @@ class HomeGuardService : AccessibilityService() {
         private const val TAG = "AerialGuard"
         private const val BOOT_WINDOW_MS = 3 * 60 * 1000L
         private const val SETTLE_MS = 1500L
+        private const val BOOT_STOCK_CAP_MS = 20_000L
         private const val WAKE_WINDOW_MS = 15_000L
         private val BOOT_RECHECKS_MS = listOf(30_000L, 45_000L)
         private const val DEAF_AFTER_MS = 20_000L

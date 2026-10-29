@@ -291,6 +291,7 @@ fun HomeScreen(
     val requesters = remember { HashMap<String, FocusRequester>() }
     fun requester(key: String) = requesters.getOrPut(key) { FocusRequester() }
     val pillRequester = remember { FocusRequester() }
+    val inputRequester = remember { FocusRequester() }
     val appContext = LocalContext.current
     val firmwareInputPanel = remember {
         SystemProbe.tclInputPanel(appContext) != null || SystemProbe.coocaaInputPanel(appContext)
@@ -302,11 +303,16 @@ fun HomeScreen(
     var focusAfterOverlay by remember { mutableStateOf<String?>(null) }
     var indexAfterOverlay by remember { mutableStateOf(0) }
     var pillFocused by remember { mutableStateOf(false) }
+    var inputFocused by remember { mutableStateOf(false) }
     var lastFocusedIndex by remember { mutableStateOf(0) }
     val focusedIndex = apps.indexOfFirst { it.key == focusedKey }
     val columns = AerialSettings.homeColumns
-    val focusedRow = if (pillFocused || focusedIndex < 0) 0 else focusedIndex / columns
+    // The input button sits in the same top row as the pill: neither is a grid row.
+    val topRowFocused = pillFocused || inputFocused
+    val focusedRow = if (topRowFocused || focusedIndex < 0) 0 else focusedIndex / columns
     val gridEnabled = overlay == Overlay.None
+    // Something to open: Android's own inputs, or the firmware's panel where it lists none (TCL).
+    val showInputButton = vm.sources.isNotEmpty() || firmwareInputPanel
 
     // The aerial wallpaper's film, and how far it shows through.
     val filmCover = remember { Animatable(0f) }
@@ -416,11 +422,12 @@ fun HomeScreen(
         withFrameNanos { }
         val wanted = focusAfterOverlay
         focusAfterOverlay = null
-        if (wanted != null) { focusedKey = wanted; pillFocused = false }
+        if (wanted != null) { focusedKey = wanted; pillFocused = false; inputFocused = false }
         val index = apps.indexOfFirst { it.key == focusedKey }
         // A tile that went while the overlay was up (hidden, put in a folder, a folder ungrouped)
         // leaves focus where it was.
         if (pillFocused && focusedKey != null) runCatching { pillRequester.requestFocus() }
+        else if (inputFocused && focusedKey != null) runCatching { inputRequester.requestFocus() }
         else focusApp(if (index >= 0) index else if (wanted != null) indexAfterOverlay else lastFocusedIndex)
     }
     // A folder whose last app left closes.
@@ -494,7 +501,7 @@ fun HomeScreen(
                         // On an app tile, Menu opens that app's menu (AppTile): remotes whose held
                         // OK never reads as held had no other way to it (issue #28). Control
                         // Center stays one press up, on the status pill, where Menu still opens it.
-                        if (overlay == Overlay.None && !pillFocused && focusedIndex >= 0) return@onPreviewKeyEvent false
+                        if (overlay == Overlay.None && !topRowFocused && focusedIndex >= 0) return@onPreviewKeyEvent false
                         // Inside a folder, Menu is the focused app's, as on Home.
                         if (overlay is Overlay.Folder) return@onPreviewKeyEvent false
                         vm.overlay = if (overlay is Overlay.ControlCenter) Overlay.None else Overlay.ControlCenter()
@@ -766,6 +773,7 @@ fun HomeScreen(
                                 focusedKey = app.key
                                 lastFocusedIndex = index
                                 pillFocused = false
+                                inputFocused = false
                             },
                             onClick = { bounds ->
                                 val mover = moving
@@ -850,6 +858,46 @@ fun HomeScreen(
                     saving = vm.screensaverVisible,
                 )
             }
+            if (showInputButton) {
+                InputButton(
+                    enabled = gridEnabled && moving == null,
+                    focusRequester = inputRequester,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        // Reached from the pill with Left, never from the grid: focusable only once
+                        // the pill (or this button itself) holds focus, so Up from a top-row tile
+                        // still lands on the pill and opens Control Center as it always did.
+                        .focusProperties {
+                            canFocus = pillFocused || inputFocused
+                            // Down leaves the top row for the tile Up came from, as the pill's does.
+                            val key = focusedKey
+                            if (key != null && apps.indexOfFirst { it.key == key } in 0 until columns) down = requester(key)
+                            right = pillRequester
+                        }
+                        .graphicsLayer {
+                            alpha = 1f - (toSaver.value * 2f).coerceIn(0f, 1f)
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
+                        },
+                    onFocused = { gained ->
+                        if (!gained) {
+                            inputFocused = false
+                        } else if (focusedKey == null) {
+                            // The window hands its first focus to the top-most control.
+                            if (apps.isNotEmpty()) focusApp(0)
+                        } else {
+                            inputFocused = true
+                            pillFocused = false
+                        }
+                    },
+                    onClick = {
+                        // A tap focuses the button and opens the page in the same frame: note it
+                        // here so focus comes back to the button when the overlay closes.
+                        inputFocused = true
+                        pillFocused = false
+                        vm.overlay = Overlay.ControlCenter(CcPage.Inputs)
+                    },
+                )
+            }
             StatusPill(
                 now = now,
                 network = vm.network,
@@ -862,6 +910,8 @@ fun HomeScreen(
                     .focusProperties {
                         val key = focusedKey
                         if (key != null && apps.indexOfFirst { it.key == key } in 0 until columns) down = requester(key)
+                        // Left is the input button, where it is shown.
+                        if (showInputButton) left = inputRequester
                     }
                     .graphicsLayer {
                         alpha = 1f - (toSaver.value * 2f).coerceIn(0f, 1f)
@@ -875,6 +925,7 @@ fun HomeScreen(
                             if (apps.isNotEmpty()) focusApp(0)
                         } else {
                             pillFocused = true
+                            inputFocused = false
                         }
                     }
                 },
@@ -882,6 +933,7 @@ fun HomeScreen(
                     // A tap focuses the pill and opens Control Center in the same frame, before
                     // onFocused hears of it: note it here so focus comes back to the pill.
                     pillFocused = true
+                    inputFocused = false
                     vm.overlay = Overlay.ControlCenter()
                 },
             )

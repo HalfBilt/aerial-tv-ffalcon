@@ -823,3 +823,46 @@ fun StatusPill(
         }
     }
 }
+
+/**
+ * Top right, left of the pill: the signal sources, one press away.
+ *
+ * On TCL the remote's input key goes to the firmware's own panel (PR #334), so the only way to the
+ * inputs was Control Center, two presses. This is the button asked for in #334 that the review left
+ * for later. It opens the same Inputs page Control Center does, which in turn opens the firmware's
+ * panel where Android lists no inputs (TCL MT5879).
+ */
+@Composable
+fun InputButton(
+    enabled: Boolean,
+    focusRequester: FocusRequester,
+    onFocused: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Pressable(
+        onClick = onClick,
+        enabled = enabled,
+        focusRequester = focusRequester,
+        focusedScale = 1.08f,
+        modifier = modifier,
+    ) { state ->
+        LaunchedEffect(state.focused) { onFocused(state.focused) }
+        val bg by animateColorAsState(
+            if (state.focused) Palette.Focus else Color.Transparent,
+            tween(160, easing = Motion.EaseOut), label = "input-bg",
+        )
+        val fg = if (state.focused) Palette.OnFocus else Color.White.copy(alpha = 0.9f)
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(bg)
+                .height(34.dp)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlyphIcon(Glyph.Input, fg, 17.dp)
+        }
+    }
+}
+

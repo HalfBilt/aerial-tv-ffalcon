@@ -114,3 +114,8 @@ Vidda C1S 激光投影（VIDAA_TV，MT9669，Android 9，PR #545）：聚好看�
 
 - 屏保设成 Aerial 的 Dream 后，Aerial 用 Somnambulator 请系统起屏保，系统没有起：Aerial 30 毫秒后又回到前台（#525 的日志）。用了航拍壁纸时，壁纸的播放器已经为屏保让出解码器，于是停住（#533）。
 - 1.48 起：请求后 1.5 秒内 Aerial 仍在前台且有焦点，就改放 Aerial 自己的屏保，这个进程里不再请系统起。没在海信真机上验证。
+
+## 4K 界面和 USB 口（Vidda G7，#896 #875）
+
+- Vidda G7（VIDAA_TV，MT9655，板 VX5SPRO，Android 14，报告人贴的输出，2026-10-29）：`ro.vt.4KUI_ability=2.1`、`ro.vtf.4kui.mtk=1`、`ro.vt.4k_whitelist_support=1`、`2K_4K.Supported=true`、`ro.surface_flinger.max_graphics_width/height=3840/2160`，`wm size` 1920×1080，显示只有 1920×1080@60 一个模式。聚好看前台时 SurfaceFlinger 里它那一层缓冲 1920×1080、`is4kGraphicLayer=false`、DEVICE 合成：自家桌面也不是 4K 送显，4K 界面看来要进 `4k_whitelist` 才开。
+- 同一位报告人的海信（MT9952，Android 14，#875）：`init.mt9952.usb.rc` 在 `sys.usb.config=adb` 时执行 `usb_otg_agent device`，OTG 控制器 `1c7a3e00.usb` 切到设备模式，接在上面的 USB 口不再认设备（2.4G 飞鼠接收器）。开机 `adb_enabled=1`，系统据此把 USB 功能设成 `adb`；`setprop persist.sys.usb.config mtp` 后重启恢复，网络 ADB 靠 `persist.adb.tcp.port=5555` + `persist.service.adb.enable=1` 维持。Aerial 不写 USB 配置，`keep_adb` 只在 `adb_enabled` 变 0 时写回 1。小米 MFTR0 是同样的规则（见 xiaomi-mitv-mftr0.md）。

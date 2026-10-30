@@ -89,6 +89,7 @@ object Brightness {
             // ignore the system setting; Control Center opens their picture panels.
             // Before Android 6.0 WRITE_SETTINGS is granted at install.
             isTcl(context) || isSony(context) || SystemProbe.skyworthPicturePanel(context) ||
+                DeviceProfile.current(context).ignoresScreenBrightness ||
                 Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(context) -> null
             else -> Settings.System.getInt(r, Settings.System.SCREEN_BRIGHTNESS, 128) / 255f
         }

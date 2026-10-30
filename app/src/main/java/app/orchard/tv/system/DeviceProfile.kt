@@ -35,9 +35,17 @@ class DeviceProfile(
      * can read tells this apart, hence a profile entry.
      */
     val bootStockMs: Int = 0,
+    /**
+     * The TV takes `screen_brightness` and moves `mActualBacklight`, yet the panel stays as it was:
+     * its picture middleware owns the backlight (Coocaa 5S09_A3, MStar, Android 6, issue #895,
+     * checked by the owner in front of the TV). Control Center opens the TV's picture settings
+     * instead of a slider that changes nothing. Nothing on the TV tells this apart.
+     */
+    val ignoresScreenBrightness: Boolean = false,
 ) {
     val isEmpty get() = hiddenHardware.isEmpty() && labels.isEmpty() && xiaomiSourceIds.isEmpty() &&
-        xiaomiFallbackSourceIds.isEmpty() && !ignoresPictureBacklight && bootStockMs <= 0
+        xiaomiFallbackSourceIds.isEmpty() && !ignoresPictureBacklight && bootStockMs <= 0 &&
+        !ignoresScreenBrightness
 
     /** The same fields `devices.json` uses, without the matching ones (models, buildMajorBelow, buildAtLeast). */
     fun toJson(): JSONObject = JSONObject().apply {
@@ -47,6 +55,7 @@ class DeviceProfile(
         if (xiaomiFallbackSourceIds.isNotEmpty()) put("xiaomiFallbackSources", JSONObject(xiaomiFallbackSourceIds.toSortedMap().mapKeys { it.key.toString() }))
         if (ignoresPictureBacklight) put("ignoresPictureBacklight", true)
         if (bootStockMs > 0) put("bootStockMs", bootStockMs)
+        if (ignoresScreenBrightness) put("ignoresScreenBrightness", true)
     }
 
     /** Where the profile in use came from, for the diagnostics. */
@@ -127,6 +136,7 @@ class DeviceProfile(
                 xiaomiFallbackSourceIds = ints("xiaomiFallbackSources"),
                 ignoresPictureBacklight = o.optBoolean("ignoresPictureBacklight", false),
                 bootStockMs = o.optInt("bootStockMs", 0).coerceIn(0, 10_000),
+                ignoresScreenBrightness = o.optBoolean("ignoresScreenBrightness", false),
             )
         }
 

@@ -50,6 +50,11 @@
       "ignoresPictureBacklight": true
     },
     {
+      "models": ["5S09_A3"],
+      "note": "Coocaa (Tianci, MStar maserati, Android 6): screen_brightness moves mActualBacklight but not the panel; the backlight is in com.tianci.setting's picture page (#895, the owner watched the TV).",
+      "ignoresScreenBrightness": true
+    },
+    {
       "models": ["WTV43K1J"],
       "note": "Whaley (Helios, Android 5.0.2): the power light breathes after a cold boot until the stock launcher has been on screen once (#902, the reporter's adb test).",
       "bootStockMs": 1000

@@ -212,6 +212,16 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 
 `bootStockMs`（#902，微鲸 WTV43K1J）：开机时守护先让原厂桌面在前台露出来，从它的窗口事件算起这么多毫秒后再接管（没有窗口事件最多等 20 秒），给要靠原厂桌面露脸才结束开机的固件用。
 
+`ignoresScreenBrightness`（#895，酷开 5S09_A3）：`screen_brightness` 写得进、`mActualBacklight` 也跟着变，但面板不变；控制中心不画亮度条，改为打开电视的图像设置（`openPictureSettings`，老酷开是 `com.tianci.setting` 的图像与声音）。
+
+小米播放器兜底（框架没列 HDMI 的小米电视）的编号顺序：机型档案里 `labels` 写成「HDMI n」且有 `xiaomiSources` 的，先用它；然后才是 `hdmiN_order`；都没有就 22 + n。小米电视 4 固件 22.8 起 `hdmiN_order` 按 droidlogic 编号，和面板上的是反的（#923）。
+
+守护每秒查用量统计（`foregroundCheck`）的条件：Android 6 及以下，或原桌面里有不发窗口事件的桌面（`INVISIBLE_LAUNCHERS`：海信聚好看、腾讯极光 `com.ktcp.launcher`，#928）。唤醒和开机后的接管都会查「Aerial 被原桌面静默盖住」（`coveredAerial`：Aerial 没在前台，用量统计里最后到前台的是原桌面）。
+
+控制中心的「是不是默认桌面」单独读、先显示，不和亮度一起等（#892：小米盒子上亮度探测 TvService 卡住，状态一直是初值）。`MitvPanel` 在机顶盒上不探测，同一时间只探一个。
+
+屏保（主屏、AerialDream、Lite）收到「没见过按下的抬起」也退出（#915：酷开 C10 的热键服务吃掉按下、只给抬起）。
+
 收到这类 issue：把 JSON 加进 `devices.json`（`models` 填上同型号的两种写法，比如 `MiTV-XXXX0` 和 `MiTV_XXXX0`，`note` 写 issue 号），`DeviceProfileTest` 跑一遍。
 
 适配流程给 Agent 的说明在 `site/adapt.md`（英文 `site/en/adapt.md`）：`tools/report.sh` 收集、`tools/selftest.sh` 实测（主页键、从别的 App 回来，可选待机、重启、逐个打开信号源并截图，最后一段 JSON 结果），按失败项试开关，整理成报告，用户同意后用 `gh issue create` 或预填表单提交。

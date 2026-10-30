@@ -960,13 +960,20 @@ object SystemProbe {
     private fun xiaomiConfiguredSource(label: String): Int? {
         val port = Regex("HDMI\\s*(\\d+)", RegexOption.IGNORE_CASE)
             .find(label)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-        return runCatching {
-            val configuration = Class.forName("mitv.common.ConfigurationManager")
-            val manager = configuration.getMethod("getInstance").invoke(null)
-            configuration.getMethod("queryTvConfigByKey", String::class.java)
-                .invoke(manager, "hdmi${port}_order") as? String
-        }.getOrNull()?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+        return xiaomiHdmiOrder(port)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
     }
+
+    /**
+     * The firmware's raw hdmiN_order, or null without the vendor framework. Diagnostics print it so
+     * boards of one model can be told apart (MiTV4-ANSM0 22.10.20.3354 numbers its ports the other
+     * way round from 22.8.15 and 22.11, #943).
+     */
+    fun xiaomiHdmiOrder(port: Int): String? = runCatching {
+        val configuration = Class.forName("mitv.common.ConfigurationManager")
+        val manager = configuration.getMethod("getInstance").invoke(null)
+        configuration.getMethod("queryTvConfigByKey", String::class.java)
+            .invoke(manager, "hdmi${port}_order") as? String
+    }.getOrNull()
 
     private fun isDigitalTuner(label: String, hw: Int): Boolean = when {
         label.contains("ATV", ignoreCase = true) -> false

@@ -150,6 +150,9 @@ object Diagnostics {
             appendLine("  shown: ${s.label} [${s.kind}] connected=${s.connected} -> ${s.intent.component?.flattenToShortString() ?: s.intent.data}" +
                 (s.xiaomiInput?.let { " input=$it" } ?: "") + " id=${s.id}")
         }
+        if (Build.MANUFACTURER.equals("xiaomi", ignoreCase = true)) {
+            appendLine("  hdmiN_order: " + (1..4).joinToString(" ") { "$it=${SystemProbe.xiaomiHdmiOrder(it)}" })
+        }
         appendLine("```")
 
         // What a maintainer copies into devices.json, as it is on this TV.

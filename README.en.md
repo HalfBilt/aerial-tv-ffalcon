@@ -136,7 +136,10 @@ adb shell pm grant app.orchard.tv android.permission.WRITE_SECURE_SETTINGS
 adb shell cmd notification allow_listener app.orchard.tv/app.orchard.tv.guard.RevivalListener
 adb shell appops set app.orchard.tv SYSTEM_ALERT_WINDOW allow
 adb shell am start -n app.orchard.tv/.MainActivity
+adb shell cmd package compile -m speed -f app.orchard.tv
 ```
+
+The last line makes Aerial smoother on the TV: run it about 5 seconds after Aerial shows, and it takes some tens of seconds. Without it, Aerial is only compiled at its next update from Control Center.
 
 On Windows, use an agent, or follow the Windows steps in the [install guide](site/en/agent.md).
 

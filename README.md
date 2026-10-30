@@ -124,7 +124,10 @@ adb shell pm grant app.orchard.tv android.permission.WRITE_SECURE_SETTINGS
 adb shell cmd notification allow_listener app.orchard.tv/app.orchard.tv.guard.RevivalListener
 adb shell appops set app.orchard.tv SYSTEM_ALERT_WINDOW allow
 adb shell am start -n app.orchard.tv/.MainActivity
+adb shell cmd package compile -m speed -f app.orchard.tv
 ```
+
+最后一条让 Aerial 在电视上更流畅：等 Aerial 显示出来、过 5 秒再运行，要几十秒。不运行的话，Aerial 要等到下次从控制中心升级时才会编译。
 
 Windows 用 Agent 装，或照[安装说明](site/agent.md)里的 Windows 步骤。
 

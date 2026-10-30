@@ -21,6 +21,7 @@ import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import app.orchard.tv.BuildConfig
 import app.orchard.tv.guard.GuardSetup
+import app.orchard.tv.system.DiagLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,21 +33,19 @@ import java.net.URL
 
 /**
  * Whether a newer release is out (issues #24, #76). Most owners stay on the version they installed
- * and report bugs fixed long ago. At most once a day Aerial reads the latest release's tag from the
+ * and report bugs fixed long ago. Aerial reads the latest release's tag from the
  * website (reachable in China, unlike GitHub); Control Center then names the new version and says
  * how to update. Nothing is downloaded or installed in the background: only when the owner picks
  * "Download and Install" does Aerial fetch the new APK and hand it to the system installer
  * ([install]).
  *
- * Every three hours, not once a day: several releases can come out in one day, and a TV that had
- * checked in the morning kept offering nothing until the next day (1.22 to 1.25 on 2026-10-22).
+ * Home and network events check at most every three hours; opening Control Center shortens that
+ * to ten minutes. Failed checks retry while Home is in front (#912).
  */
 object Updates {
     private const val TAG = "AerialUpdates"
     private const val PREFS = "updates"
     private const val VERSION_URL = "https://aerial.qust.me/download/version.txt"
-    private const val CHECK_EVERY_MS = 3 * 60 * 60 * 1000L
-    private const val RETRY_MS = 10 * 60 * 1000L
 
     /**
      * A source that delivers less than [STALL_BYTES] in [STALL_MS] is given up for the next one
@@ -54,7 +53,7 @@ object Updates {
      */
     private const val STALL_MS = 30_000L
     private const val STALL_BYTES = 256 * 1024L
-    const val CONTROL_CENTER_MAX_AGE_MS = RETRY_MS
+    const val CONTROL_CENTER_MAX_AGE_MS = UpdateCheck.PANEL_MAX_AGE_MS
 
     /** This build's version, e.g. "1.17" (the guard build's "-guard" left off). */
     val current: String = BuildConfig.VERSION_NAME.substringBefore('-')
@@ -69,7 +68,7 @@ object Updates {
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var started = false
-    private var lastAttempt = 0L
+    private var checker: UpdateCheck? = null
 
     fun init(context: Context) {
         if (started) return
@@ -77,6 +76,16 @@ object Updates {
         appContext = context.applicationContext
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         available = prefs.getString("latest", null)?.takeIf { newer(it, current) }
+        checker = UpdateCheck(
+            scope = scope,
+            lastSuccess = { prefs.getLong("checked_at", 0) },
+            read = { withContext(Dispatchers.IO) { read(VERSION_URL) } },
+            save = { latest, checkedAt ->
+                prefs.edit { putString("latest", latest); putLong("checked_at", checkedAt) }
+                available = latest.takeIf { newer(it, current) }
+            },
+            log = { Log.i(TAG, it); DiagLog.i("update check: $it") },
+        )
         // A download left from an install that has since finished or been given up.
         scope.launch(Dispatchers.IO) {
             apkFile(context).takeIf { System.currentTimeMillis() - it.lastModified() > 60 * 60 * 1000L }?.delete()
@@ -88,22 +97,21 @@ object Updates {
      * Center asks with a shorter [maxAgeMs]: that is where the viewer looks for a new version, and a
      * release out an hour ago was not shown there for hours more (issue #301).
      */
-    fun checkIfStale(force: Boolean = false, maxAgeMs: Long = CHECK_EVERY_MS) {
-        if (!started) return
-        val now = System.currentTimeMillis()
-        if (!force && (now - lastAttempt < RETRY_MS || now - prefs.getLong("checked_at", 0) < maxAgeMs)) return
-        lastAttempt = now
-        scope.launch {
-            val latest = withContext(Dispatchers.IO) {
-                runCatching { read(VERSION_URL).trim().removePrefix("v") }
-                    .onFailure { Log.w(TAG, "could not check for a new version", it) }
-                    .getOrNull()
-                    ?.takeIf { it.matches(Regex("\\d+(\\.\\d+)*")) }
-            } ?: return@launch
-            prefs.edit { putString("latest", latest); putLong("checked_at", System.currentTimeMillis()) }
-            available = latest.takeIf { newer(it, current) }
-        }
+    fun checkIfStale(
+        force: Boolean = false,
+        maxAgeMs: Long = UpdateCheck.MAX_AGE_MS,
+        networkCameUp: Boolean = false,
+    ) {
+        checker?.check(force, maxAgeMs, networkCameUp, when {
+            force -> "forced"
+            networkCameUp -> "network"
+            maxAgeMs == CONTROL_CENTER_MAX_AGE_MS -> "control center"
+            else -> "home"
+        })
     }
+
+    fun diagnostics(): String = if (!started) "not initialized" else
+        "known=${prefs.getString("latest", null) ?: "unknown"}; ${checker?.diagnostics}"
 
     /** Whether version [a] comes after [b], comparing dotted numbers ("1.10" after "1.9"). */
     fun newer(a: String, b: String): Boolean {
@@ -281,10 +289,13 @@ object Updates {
         }
     }
 
-    /** Back in Aerial with the installer closed and Aerial not replaced: the owner backed out. */
+    /** Resume failed checks; if the installer closed without replacing Aerial, reset its button. */
     fun onHomeResumed() {
+        checker?.setActive(true)
         if (install == Install.Opened) install = Install.Idle
     }
+
+    fun onHomePaused() { checker?.setActive(false) }
 
     /** Back to the button, when the update page is left. */
     fun resetInstall() {

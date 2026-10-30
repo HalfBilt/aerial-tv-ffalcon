@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
             vm.refreshNetwork()
             Wallpapers.refreshDailyIfStale(networkCameUp = true)
             Weather.refreshIfStale(networkCameUp = true)
-            Updates.checkIfStale()
+            Updates.checkIfStale(networkCameUp = true)
         }
         override fun onLost(network: Network) = runOnUiThread { vm.refreshNetwork() }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = runOnUiThread { vm.refreshNetwork() }
@@ -811,6 +811,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         if (locked) return
         vm.resumed = false
+        Updates.onHomePaused()
         DiagLog.i("onPause")
         GuardSetup.setHomeInFront(this, false)
         if (HomeGuardService.onAerialPaused()) {

@@ -456,6 +456,12 @@ class HomeGuardService : AccessibilityService() {
             scheduleBootRechecks()
         }
         refreshStockHomes()
+        registerReceiver(packageChanges, IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        })
         screenOff = getSystemService<PowerManager>()?.isInteractive == false
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
             runCatching { getSystemService<InputManager>()?.registerInputDeviceListener(gamepadListener, handler) }
@@ -601,6 +607,8 @@ class HomeGuardService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(refreshHomesAfterPackageChange)
+        runCatching { unregisterReceiver(packageChanges) }
         runCatching { unregisterReceiver(screenOn) }
         runCatching { unregisterReceiver(homeKey) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -1015,6 +1023,22 @@ class HomeGuardService : AccessibilityService() {
             PackageManager.MATCH_DEFAULT_ONLY,
         )?.activityInfo?.packageName
 
+    /**
+     * The stock launcher list is read again when a package is enabled, disabled, installed or
+     * removed. Read only at bind and unlock, it went stale: a guard bound while PatchWall was
+     * disabled kept ignoring it after `pm enable`, so Home stayed on PatchWall until a reboot
+     * (Xiaomi MiTV-MFTR0, OS3.0.101, issue #901). One update sends several broadcasts, so they
+     * are folded into one read.
+     */
+    private val refreshHomesAfterPackageChange = Runnable { refreshStockHomes() }
+
+    private val packageChanges = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            handler.removeCallbacks(refreshHomesAfterPackageChange)
+            handler.postDelayed(refreshHomesAfterPackageChange, PACKAGE_SETTLE_MS)
+        }
+    }
+
     private fun refreshStockHomes() {
         val standard = packageManager.queryIntentActivities(
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
@@ -1190,6 +1214,7 @@ class HomeGuardService : AccessibilityService() {
         private const val DOUBLE_HOME_MS = 400L
         /** Android's hold on app starts after Home (stopAppSwitches), with a margin. */
         private const val APP_SWITCH_HOLD_MS = 5_500L
+        private const val PACKAGE_SETTLE_MS = 1000L
         private const val PATCHWALL = "com.mitv.tvhome"
         /**
          * PatchWall's boot cover, which comes up over Aerial some 20 s into a boot and is no home

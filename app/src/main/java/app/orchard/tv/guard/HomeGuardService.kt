@@ -94,7 +94,12 @@ class HomeGuardService : AccessibilityService() {
 
     private var takeOverReason = ""
     private var takeOverOnWake = false
-    private val takeOver = Runnable { takeOverIfStockHomeInFront(takeOverReason, takeOverOnWake) }
+    // On a wake, also ask usage stats whether a stock home silently covered Aerial: Tencent's Aurora
+    // box 4 Pro (A4111, Android 11) puts com.ktcp.launcher in front while it goes to sleep, with no
+    // window change, so the last window seen was still Aerial's and the launcher stayed after the
+    // wake (issue #928, the reporter's log). coveredAerial needs Aerial's Home not resumed and a
+    // stock home as the newest move to the front.
+    private val takeOver = Runnable { takeOverIfStockHomeInFront(takeOverReason, takeOverOnWake, coveredSilently = takeOverOnWake) }
 
     /**
      * A profile's [DeviceProfile.bootStockMs]: at power-on the stock launcher is left in front
@@ -482,9 +487,12 @@ class HomeGuardService : AccessibilityService() {
         // Hisense VIDAA's own launcher (聚好看, com.jamdeo.tv.vod) raises no window change to
         // third-party services on any version seen, while other apps' events arrive; usage stats
         // record its moves to the front as on PatchWall (Vidda C1S, MT9669, Android 9, PR #545,
-        // checked by the author with a local build). Only where that launcher is a stock home, so
-        // other TVs past Android 6 are not polled.
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M || VIDAA_LAUNCHER in stockHomes) {
+        // checked by the author with a local build). Tencent's 极光 launcher (com.ktcp.launcher) on
+        // the Aurora box 4 Pro (A4111, Amlogic SC2, Android 11) is the same: it comes to the front
+        // at boot, during standby and on Home with no window change (issue #928, the reporter's
+        // logs), while usage stats record it. Only where one of these launchers is a stock home,
+        // so other TVs past Android 6 are not polled.
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M || INVISIBLE_LAUNCHERS.any { it in stockHomes }) {
             handler.removeCallbacks(foregroundCheck)
             if (usageStatsAllowed(this)) handler.post(foregroundCheck)
             else Log.i(TAG, "usage stats not allowed; not watching the front by them")
@@ -1225,6 +1233,9 @@ class HomeGuardService : AccessibilityService() {
         private const val PATCHWALL_BOOT = "com.mitv.tvhome.BootActivity"
         /** Hisense VIDAA's launcher, invisible to window changes; see foregroundCheck. */
         private const val VIDAA_LAUNCHER = "com.jamdeo.tv.vod"
+
+        /** Stock launchers that come to the front with no window change; see foregroundCheck. */
+        private val INVISIBLE_LAUNCHERS = setOf(VIDAA_LAUNCHER, "com.ktcp.launcher")
         /** Actions the firmware's own task centre answers, tried in order before SystemUI's recents. */
         private val TASK_CENTRE_ACTIONS = listOf("com.dangbei.recentstask.action.SHOW_RECENTS_FOR_USER")
         private const val VOLUME_REPEAT_MAX_MS = 8_000L

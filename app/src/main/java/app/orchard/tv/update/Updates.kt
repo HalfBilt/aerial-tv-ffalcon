@@ -168,11 +168,12 @@ object Updates {
     fun canInstall(context: Context): Boolean = context.packageName == PACKAGE
 
     /**
-     * Downloads this flavor's APK of the latest release and opens the system installer on it.
-     * Not PackageInstaller sessions: TCL's verifier (docs/devices/tcl-mt5879-cn.md) passes only
-     * installs that go through com.android.packageinstaller, as Dangbei's do, and an ACTION_VIEW on
-     * the APK makes the installer itself the one installing. Android 13 and later, a session first
-     * (installBySession). The APK must be this package, signed
+     * Downloads this flavor's APK of the latest release and installs it. Android 9 and later, a
+     * PackageInstaller session first (installBySession), as only a session can carry the dex
+     * metadata that has the system compile Aerial as it installs. Where the session fails, the system
+     * installer by ACTION_VIEW, as before Android 9: TCL's verifier (docs/devices/tcl-mt5879-cn.md)
+     * passes only installs that go through com.android.packageinstaller, as Dangbei's do, and an
+     * ACTION_VIEW on the APK makes the installer itself the one installing. The APK must be this package, signed
      * with this copy's key and no older, or the installer would only fail with a less clear message.
      */
     fun install(context: Context) {
@@ -217,7 +218,7 @@ object Updates {
                 install = Install.Failed(failure)
                 return@launch
             }
-            val opened = if (Build.VERSION.SDK_INT >= 33) installBySession(app, file) else openInstaller(context, app, file)
+            val opened = if (Build.VERSION.SDK_INT >= 28) installBySession(app, file) else openInstaller(context, app, file)
             install = if (opened) Install.Opened else Install.Failed(Failure.Blocked)
         }
     }
@@ -229,33 +230,72 @@ object Updates {
      * this way, and stayed on after one pushed by 多屏互动 (issue #723). A session that says where
      * the APK came from is not restricted; the system still asks the owner to confirm. Where the
      * firmware turns the session down, the installer's ACTION_VIEW as before (UpdateResult).
+     *
+     * The session also carries the new APK's dex metadata (assets/aerial-dm, see app/build.gradle.kts)
+     * as aerial.dm, from Android 9: the system then compiles Aerial with its Baseline Profile as it
+     * installs (Xiaomi MiTV-MFTR0: status speed-profile, reason install-dm). Without it the update ran
+     * uncompiled until the next one, its main thread about twice as slow (docs/PERF-2026-10-30.md).
+     * Should a firmware refuse the metadata, the APK alone once more ([withDm]).
      */
-    @RequiresApi(33)
-    private fun installBySession(app: Context, file: File): Boolean = runCatching {
+    @RequiresApi(28)
+    private fun installBySession(app: Context, file: File, withDm: Boolean = true): Boolean = runCatching {
         val installer = app.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(app.packageName)
-            setPackageSource(PackageInstaller.PACKAGE_SOURCE_OTHER)
+            if (Build.VERSION.SDK_INT >= 33) setPackageSource(PackageInstaller.PACKAGE_SOURCE_OTHER)
+            // Android 12 and later let an app update itself without the confirmation page, which some
+            // firmwares do not have (Xiaomi MiTV-MFTR0: no CONFIRM_INSTALL activity, so the session
+            // gave way to the installer's ACTION_VIEW and its dex metadata was lost). The owner has
+            // just picked "Download and Install". Where the system still wants a confirmation, it
+            // answers STATUS_PENDING_USER_ACTION as before.
+            if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
+        val dm = if (withDm) dexMetadata(file) else null
         val id = installer.createSession(params)
-        installer.openSession(id).use { session ->
-            file.inputStream().use { input ->
-                session.openWrite("aerial.apk", 0, file.length()).use { out ->
-                    input.copyTo(out)
+        try {
+            installer.openSession(id).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("aerial.apk", 0, file.length()).use { out ->
+                        input.copyTo(out)
+                        session.fsync(out)
+                    }
+                }
+                if (dm != null) session.openWrite("aerial.dm", 0, dm.size.toLong()).use { out ->
+                    out.write(dm)
                     session.fsync(out)
                 }
+                val result = Intent(app, UpdateResult::class.java).putExtra(EXTRA_WITH_DM, dm != null)
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                GuardSetup.noteInstallerOpened(app)
+                session.commit(PendingIntent.getBroadcast(app, id, result, flags).intentSender)
             }
-            val result = Intent(app, UpdateResult::class.java)
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-            GuardSetup.noteInstallerOpened(app)
-            session.commit(PendingIntent.getBroadcast(app, id, result, flags).intentSender)
+        } catch (e: Exception) {
+            runCatching { installer.abandonSession(id) }
+            throw e
         }
-        Log.i(TAG, "install session $id committed for ${file.length()} bytes")
+        Log.i(TAG, "install session $id committed for ${file.length()} bytes, dex metadata ${dm?.size ?: "none"}")
+        DiagLog.i("update: session $id, dex metadata ${dm?.size ?: "none"}")
         true
     }.getOrElse {
-        Log.w(TAG, "no install session; opening the installer", it)
-        openInstaller(app, app, file)
+        if (withDm) {
+            Log.w(TAG, "install session with dex metadata failed; without it", it)
+            installBySession(app, file, withDm = false)
+        } else {
+            Log.w(TAG, "no install session; opening the installer", it)
+            openInstaller(app, app, file)
+        }
     }
+
+    /**
+     * The dex metadata the build put in [apk] for this Android (28.dm for 9 to 11, 31.dm from 12),
+     * or null: an APK from before 1.72, or one that cannot be read.
+     */
+    private fun dexMetadata(apk: File): ByteArray? = runCatching {
+        val name = if (Build.VERSION.SDK_INT >= 31) "assets/aerial-dm/31.dm" else "assets/aerial-dm/28.dm"
+        java.util.zip.ZipFile(apk).use { zip -> zip.getEntry(name)?.let { e -> zip.getInputStream(e).use { it.readBytes() } } }
+    }.getOrNull()
+
+    private const val EXTRA_WITH_DM = "app.orchard.tv.update.WITH_DM"
 
     /** The session's answer (UpdateResult): the owner's confirmation, or the installer instead. */
     internal fun onSessionResult(context: Context, intent: Intent) {
@@ -282,8 +322,17 @@ object Updates {
             }
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-                Log.w(TAG, "install session failed ($status, $message); opening the installer")
                 val file = apkFile(app)
+                // A firmware that turns the dex metadata down (INSTALL_FAILED_BAD_DEX_METADATA):
+                // the APK alone in a new session.
+                if (intent.getBooleanExtra(EXTRA_WITH_DM, false) && message.orEmpty().contains("DEX_METADATA", ignoreCase = true) &&
+                    Build.VERSION.SDK_INT >= 28 && file.isFile
+                ) {
+                    Log.w(TAG, "install session refused the dex metadata ($message); without it")
+                    if (installBySession(app, file, withDm = false)) return
+                }
+                Log.w(TAG, "install session failed ($status, $message); opening the installer")
+                DiagLog.i("update: session failed ($status, $message); installer")
                 if (!file.isFile || !openInstaller(app, app, file)) install = Install.Failed(Failure.Blocked)
             }
         }

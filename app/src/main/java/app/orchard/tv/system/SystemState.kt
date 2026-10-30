@@ -221,6 +221,9 @@ object SystemProbe {
             // settings panel here by component (issue #771).
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings", "com.konka.settingcenter.settings.view.MainSettingsActivity")),
             Intent(Settings.ACTION_SETTINGS),
+            // Konka Android TV 553 (Hi3751V553, Android 5.1.1) has neither of the above: its settings
+            // are a second app, opened by component on the TV by the reporter (issue #918).
+            Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting", "com.konka.systemsetting.MainActivity")),
             // TCL MT5879 (China): nothing answers ACTION_SETTINGS; MAIN opens TCL's full settings panel.
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
             // PPTV K55U27 (MStar, Android 6): its settings app answers no standard action (issue #264).

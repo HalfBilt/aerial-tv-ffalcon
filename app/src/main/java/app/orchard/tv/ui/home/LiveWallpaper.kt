@@ -12,8 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -23,6 +25,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.core.graphics.createBitmap
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -54,6 +59,29 @@ internal const val START_AFTER_MS = 10_000L
 
 /** A stopped film keeps its player this long, so it moves on again without loading. */
 internal const val KEEP_STOPPED_MS = 2 * 60 * 1000L
+
+/**
+ * Runs [letGo] the moment Aerial stops (an app, a dream or standby in front) and returns how many
+ * times it let something go, a key for the film's LaunchedEffect so it starts again on Home.
+ * LaunchedEffect(play) lets the player go only at the next recomposition, and none comes once the
+ * activity is stopped (Compose pauses its frame clock): on TCL MT5879, with no frame between
+ * onPause and onStop, the 4K film went on decoding behind Quark's player, which lost its hardware
+ * decoder to it and stuttered in software; the film's error retry then took a decoder again.
+ */
+@Composable
+internal fun rememberStops(letGo: () -> Boolean): Int {
+    var stops by remember { mutableIntStateOf(0) }
+    val letGoNow by rememberUpdatedState(letGo)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && letGoNow()) stops++
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    return stops
+}
 
 /**
  * The film behind Home, for the screensaver that carries it on instead of starting its own
@@ -207,6 +235,8 @@ fun LiveWallpaper(
 
                 override fun onPlayerError(error: PlaybackException) {
                     DiagLog.i("wallpaper film failed (${error.errorCodeName})")
+                    // Behind an app or another screensaver the decoder is theirs: no retry.
+                    if (!keepNow) return
                     // The same film again, from where it was: going on to the next one on any error
                     // left the screensaver on another film (TCL MT5879, DECODING_FAILED three times
                     // in a minute). The next one only after three; after six Apple's host is out
@@ -304,7 +334,16 @@ fun LiveWallpaper(
         }
     }
 
-    LaunchedEffect(play) {
+    val scope = rememberCoroutineScope()
+    val stops = rememberStops {
+        if (player == null) return@rememberStops false
+        DiagLog.i("wallpaper film lets go as Aerial stops")
+        release()
+        scope.launch { cover.snapTo(0f) }
+        true
+    }
+
+    LaunchedEffect(play, stops) {
         live.stopped = false
         if (play) {
             // Let go past its picture (into an app, or a screensaver of its own), it goes on from

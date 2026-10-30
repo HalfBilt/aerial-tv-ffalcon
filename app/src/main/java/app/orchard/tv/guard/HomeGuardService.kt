@@ -1305,6 +1305,11 @@ class HomeGuardService : AccessibilityService() {
             // away, so Home stayed there and its usage stats were not watched (issue #700). Not
             // seen on a TV here; named so it counts wherever the activity exists.
             "com.jamdeo.tv.vod" to listOf("com.ju.main.launcher.LauncherActivity"),
+            // Xiaomi's office mode (办公模式) home on Mi TV 4 (MiTV4-ANSM0, Android 6.0.1): with it
+            // on, Aerial stopped from the task list never came back, as the guard did not count
+            // it (issue #861, the reporter's mResumedActivity). The elderly mode's home is
+            // PatchWall's MainActivityUserMode, which already counts.
+            "com.xiaomi.eetv.litehome" to listOf("com.xiaomi.eetv.litehome.Launcher"),
         )
 
         /**

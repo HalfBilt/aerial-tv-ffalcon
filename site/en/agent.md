@@ -244,6 +244,8 @@ A Home press sent with `input keyevent` skips Home Guard's key filter, so on a f
 
 Once all of it passes, ask the user before running `adb reboot`. After the TV has started again (a minute or two), `adb connect <IP>:5555` and run line 6 again to confirm the TV starts into Aerial.
 
+When everything is done, run `adb disconnect`: some TVs accept one device at a time, and phone tools such as 甲壳虫 cannot connect until this computer lets go (#764). The one-line install disconnects by itself.
+
 ## Undo
 
 macOS / Linux:

@@ -244,6 +244,8 @@ adb shell "sleep 8; dumpsys window | grep mCurrentFocus"
 
 都通过后，征得用户同意再 `adb reboot`，等一两分钟电视开机后重新 `adb connect <IP>:5555`，再跑一次第 6 条，确认开机直接进入 Aerial。
 
+全部做完后运行 `adb disconnect`：有的电视同一时间只接受一台设备，这台电脑不断开，用户手机上的甲壳虫等工具就连不上（#764）。一行命令装完会自动断开。
+
 ## 还原
 
 macOS / Linux：

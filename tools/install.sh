@@ -12,6 +12,7 @@
 # (and python3 on TCL TVs).
 #   BUILD=1        build it from this checkout instead (JDK 17 + Android SDK)
 #   APK_FILE=<apk> install this file instead
+#   STAY_CONNECTED=1  stay connected to the TV afterwards (otherwise adb lets go of it at the end)
 #
 # Takeover, gentlest first. Nothing is uninstalled or disabled:
 #   1. Ask Android: HOME role / preferred home activity. Works on stock Android TV and Google TV.
@@ -46,6 +47,12 @@ fi
 
 case "$TV" in *:*) SERIAL="$TV" ;; *) SERIAL="$TV:5555" ;; esac
 export ANDROID_SERIAL="$SERIAL"
+# Let go of the TV at the end unless it was connected before: some TVs take one computer at a time,
+# and the phone apps the owner uses next (甲壳虫 and the like) could not connect until this
+# computer's adb server dropped it (issue #764). STAY_CONNECTED=1 keeps it.
+if [ "${STAY_CONNECTED:-0}" != 1 ] && ! adb devices 2>/dev/null | grep -q "^$SERIAL[[:space:]]"; then
+  trap 'adb disconnect "$SERIAL" >/dev/null 2>&1 || true; [ -n "${MAIN_SERIAL:-}" ] && adb disconnect "$MAIN_SERIAL" >/dev/null 2>&1; true' EXIT
+fi
 adb connect "$SERIAL" >/dev/null
 STATE=$(adb get-state 2>&1 || true)
 if [ "$STATE" != device ]; then

@@ -138,3 +138,6 @@
 - 「安装未知应用」是 Android TV 设置里的总列表（`com.android.tv.settings/.device.apps.specialaccess.ExternalSourcesActivity`），不会直接定位到 Aerial；`install.sh` 用 appops 预先放行。
 - 按「完成」后露出的是 PatchWall 的 `com.mitv.tvhome/.DetailsActivity`，不是 HOME Activity，所以加了「安装器关闭后拉回 Aerial」那条规则（见 ARCHITECTURE.md「升级」）。
 
+## 打开 ADB 后有一个 USB 口不认设备（#907，#875 同一规则）
+
+`/vendor/etc/init/hw/init.mt9653.usb.rc`（户主这台 OS3.0，2026-10-30 读出）：`sys.usb.config=adb` 时执行 `usb_otg_agent device`，把 OTG 控制器 `1c7a3e00.usb` 切到设备模式；`none`、`mtp` 时切回 `host`；`persist.sys.usb.config=mtp,adb` 会被改写成 `mtp`。户主这台 `adb_enabled=1`、`sys.usb.config=adb`、`persist.sys.usb.config` 为空，所以这个控制器下的口（报告人说是 USB 2.0 那个）不认 U 盘和手柄。Aerial 不写 USB 配置，但 `keep_adb` 会在小米关掉 ADB 时重新打开它。没有插设备验证是哪个物理口；`mode` 文件要 root 才能读。海信 VIDAA（MT9952，#875）是同样的规则，报告人 `setprop persist.sys.usb.config mtp` 后重启恢复。

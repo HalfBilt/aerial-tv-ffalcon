@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
             vm.refreshNetwork()
             Wallpapers.refreshDailyIfStale(networkCameUp = true)
             Weather.refreshIfStale(networkCameUp = true)
-            Updates.checkIfStale()
+            Updates.checkIfStale(networkCameUp = true)
         }
         override fun onLost(network: Network) = runOnUiThread { vm.refreshNetwork() }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = runOnUiThread { vm.refreshNetwork() }
@@ -566,6 +566,9 @@ class MainActivity : ComponentActivity() {
     }
     private var swallowKeyUp = -1
 
+    /** Keys whose press reached Aerial and which have not been lifted yet; see dispatchKeyEvent. */
+    private val keysDown = HashSet<Int>()
+
     /**
      * Until when every key only finishes waking the screensaver. An IR remote can send one press as
      * two (TCL MT5879: a Down that woke it, then another that moved focus into the grid); Xiaomi's
@@ -658,10 +661,21 @@ class MainActivity : ComponentActivity() {
         }
         if (keysLogged++ < 200) DiagLog.i("key ${KeyEvent.keyCodeToString(event.keyCode)} ${if (event.action == KeyEvent.ACTION_DOWN) "down" else "up"} #${event.repeatCount} at ${event.eventTime}, view focused ${currentFocus != null}")
         restartIdleTimer()
+        // A lift whose press never reached Aerial: Coocaa C10's hotkey service takes the press of
+        // its focus and settings keys and lets only the lift through (issue #915, the reporter's
+        // WindowManager log). In the screensaver that lift ends it as a press would.
+        val loneLift = event.action == KeyEvent.ACTION_UP && !event.isCanceled && event.keyCode !in keysDown
+        if (event.action == KeyEvent.ACTION_DOWN) keysDown += event.keyCode else keysDown -= event.keyCode
         // The key that wakes the screensaver only wakes it, silently.
         if (!vm.screensaverVisible && event.keyCode != swallowKeyUp) Sounds.onKey(event)
         // Left / right step through the films or photos and keep the screensaver up.
         if (vm.screensaverVisible && vm.screensaverSkips.onKey(event)) return true
+        if (vm.screensaverVisible && loneLift) {
+            DiagLog.i("key ${KeyEvent.keyCodeToString(event.keyCode)} lifted with no press; ending the screensaver")
+            hideScreensaver()
+            wakeQuietUntil = SystemClock.uptimeMillis() + WAKE_QUIET_MS
+            return true
+        }
         if (vm.screensaverVisible && event.action == KeyEvent.ACTION_DOWN) {
             // The key that wakes the screen only wakes it; it does not also move focus or open an app.
             hideScreensaver()
@@ -797,6 +811,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         if (locked) return
         vm.resumed = false
+        Updates.onHomePaused()
         DiagLog.i("onPause")
         GuardSetup.setHomeInFront(this, false)
         if (HomeGuardService.onAerialPaused()) {

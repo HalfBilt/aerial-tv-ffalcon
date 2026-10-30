@@ -136,7 +136,10 @@ adb shell pm grant app.orchard.tv android.permission.WRITE_SECURE_SETTINGS
 adb shell cmd notification allow_listener app.orchard.tv/app.orchard.tv.guard.RevivalListener
 adb shell appops set app.orchard.tv SYSTEM_ALERT_WINDOW allow
 adb shell am start -n app.orchard.tv/.MainActivity
+adb shell cmd package compile -m speed -f app.orchard.tv
 ```
+
+The last line makes Aerial smoother on the TV: run it about 5 seconds after Aerial shows, and it takes some tens of seconds. Without it, Aerial is only compiled at its next update from Control Center.
 
 On Windows, use an agent, or follow the Windows steps in the [install guide](site/en/agent.md).
 
@@ -241,6 +244,7 @@ Most TVs sold in China only accept their own home screen and clear third-party a
 | Hisense | E5Q Pro | Android 11 | ✅ ([#790](https://github.com/pengchujin/aerial-tv/issues/790)) |
 | Hisense | 85U7G-PRO (MT9652) | Android 9 | ✅ After installing the APK, the first Home press offers Aerial; pick it and "Always", and the TV boots into Aerial without ADB ([#886](https://github.com/pengchujin/aerial-tv/issues/886)) |
 | Hisense | VIDAA_TV (MSD6A348) | Android 4.4 | ✅ Aerial Lite from a USB drive; pick it with "Always" at the Home prompt; no brightness ([#769](https://github.com/pengchujin/aerial-tv/issues/769)) |
+| Hisense | LED47K600X3D (VIDAA_TV, MT5880) | Android 4.0.4 | ⚠️ Aerial Lite installs and boots straight in; the remote's Home, APP and VOD keys open Hisense's own screens through a private path Aerial cannot catch ([#913](https://github.com/pengchujin/aerial-tv/issues/913)) |
 | Sharp | LCD-50SU671A | Android 6 | ✅ Needs QuickShortcutMaker to open ADB |
 | OPPO | K9 | Android 9 | ⚠️ Needs a renamed package ([notes](docs/devices/oppo-coloros-tv.md)) |
 | XGIMI | Z7X, m7642 | Android 9 | ✅ Z7X needs a third-party tool to open ADB ([notes](docs/devices/xgimi-z7x.md)) |

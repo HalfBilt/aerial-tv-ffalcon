@@ -16,7 +16,9 @@ object SystemIntents {
         context,
         Intent("com.xiaomi.mitv.settings.SETTINGS").setComponent(ComponentName("com.xiaomi.mitv.settings", "com.xiaomi.mitv.settings.entry.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.haier.tv.menusetting", "com.haier.tv.menusetting.RootActivity")),
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings", "com.konka.settingcenter.settings.view.MainSettingsActivity")),
         Intent(Settings.ACTION_SETTINGS),
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting", "com.konka.systemsetting.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.pptv.setting", "com.pptv.setting.root.SettingsActivity")),
         Intent(Intent.ACTION_VIEW, Uri.parse("Settings://com.xgimi.misckey.main/mainPage")),
@@ -34,9 +36,10 @@ object SystemIntents {
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
     )
 
-    // Same OEM entry as SystemProbe, verified on Hisense H55E9A / Android 8 (#760).
+    // Same OEM network category as SystemProbe (#760), not the direct Wi-Fi list.
+    // Sidebar focus verified on H55E9A / Android 8; Android 4.x Lite still needs device verification.
     private fun hisenseNetworkSettingsIntent(context: Context): Intent? {
-        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).setComponent(
+        val intent = Intent("android.settings.NETWORK_SETTINGS").setComponent(
             ComponentName("com.android.tv.settings", "com.hisense.systemsettings.MainActivity"),
         )
         val info = runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo }.getOrNull()

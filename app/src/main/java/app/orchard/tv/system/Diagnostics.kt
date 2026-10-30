@@ -18,6 +18,7 @@ import app.orchard.tv.BuildConfig
 import app.orchard.tv.guard.GuardSetup
 import app.orchard.tv.guard.HomeGuardService
 import app.orchard.tv.settings.AerialSettings
+import app.orchard.tv.update.Updates
 import app.orchard.tv.wallpaper.PhoneServer
 import app.orchard.tv.wallpaper.Wallpapers
 import org.json.JSONArray
@@ -129,6 +130,12 @@ object Diagnostics {
         appendLine("```")
 
         appendLine()
+        appendLine("**Update check**")
+        appendLine("```")
+        appendLine(Updates.diagnostics())
+        appendLine("```")
+
+        appendLine()
         appendLine("**Brightness**")
         appendLine("```")
         appendLine("Aerial can set it: ${Brightness.level(context) != null}")
@@ -142,6 +149,9 @@ object Diagnostics {
         SystemProbe.sources(context).forEach { s ->
             appendLine("  shown: ${s.label} [${s.kind}] connected=${s.connected} -> ${s.intent.component?.flattenToShortString() ?: s.intent.data}" +
                 (s.xiaomiInput?.let { " input=$it" } ?: "") + " id=${s.id}")
+        }
+        if (Build.MANUFACTURER.equals("xiaomi", ignoreCase = true)) {
+            appendLine("  hdmiN_order: " + (1..4).joinToString(" ") { "$it=${SystemProbe.xiaomiHdmiOrder(it)}" })
         }
         appendLine("```")
 

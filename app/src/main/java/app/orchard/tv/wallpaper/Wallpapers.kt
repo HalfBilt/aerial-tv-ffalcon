@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -168,6 +169,17 @@ object Wallpapers {
      */
     var frosted by mutableStateOf<ImageBitmap?>(null); private set
 
+    /**
+     * Whether the moving wallpaper's frames cannot be had for its glass on this TV: PixelCopy reads
+     * the film too slowly to use and its file is not read (TCL MT5879), or the file's frames stuck
+     * since the TV started (LiveWallpaper). Then the top row's plate is the smoke alone over the
+     * film and panels are one solid colour, rather than the frosted frame of minutes before.
+     */
+    var filmGlassless by mutableStateOf(false)
+
+    /** Goes up when a moving wallpaper's picture changes, so its card in Personalize is made again. */
+    var pictureVersion by mutableIntStateOf(0); private set
+
     private var backdropJob: Job? = null
     private var started = false
 
@@ -305,9 +317,11 @@ object Wallpapers {
     /** A 16:9 thumbnail for pickers and the phone page. Call off the main thread. */
     fun thumbnail(id: String): Bitmap? {
         synchronized(thumbs) { thumbs[id] }?.let { return it }
+        // A frame kept meanwhile (useLiveFrame) makes this one old: shown, not kept.
+        val version = pictureVersion
         val wp = (if (id == LATEST_DAILY || id == ROTATE_PHOTOS) resolve(id) else items.firstOrNull { it.id == id }) ?: return null
         val b = if (wp.kind == WallpaperKind.Auto) Gradients.render(Gradients.autoThumb, 384, 216) else picture(wp, 384, 216)
-        if (b != null) synchronized(thumbs) { thumbs[id] = b }
+        if (b != null) synchronized(thumbs) { if (version == pictureVersion) thumbs[id] = b }
         return b
     }
 
@@ -447,6 +461,7 @@ object Wallpapers {
         synchronized(thumbs) { thumbs.remove(id); if (isVideo(id)) { thumbs.remove(VIDEOS); thumbs.remove(VIDEO_PREFIX + film) } }
         backdrop = bmp.asImageBitmap()
         frosted = frost.asImageBitmap()
+        pictureVersion++
         resolve(id)?.let { saveBaked(bakedKey(it), bmp, frost) }
     }
 

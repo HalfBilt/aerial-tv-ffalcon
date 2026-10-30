@@ -509,6 +509,9 @@ class HomeActivity : Activity(), HomeView.Host {
         if (!keepBelow) closeAll()
         panels += p
         root.addView(p)
+        home.coveredBelow = 0
+        // Once Personalize has slid in (320 ms), Home draws only above it.
+        if (p is Personalize) handler.postDelayed({ if (panels.lastOrNull() === p) home.coveredBelow = p.covers }, 400)
         // Panels at the top right take the status pill's place, as in the full app.
         home.topRight.alpha = if (panels.any { it is ControlCenter || it is HiddenApps }) 0f else 1f
         redrawAllInSoftware()
@@ -516,6 +519,7 @@ class HomeActivity : Activity(), HomeView.Host {
 
     private fun closePanel() {
         panels.removeLastOrNull()?.let { root.removeView(it) }
+        home.coveredBelow = 0
         home.topRight.alpha = if (panels.any { it is ControlCenter || it is HiddenApps }) 0f else 1f
         redrawAllInSoftware()
     }

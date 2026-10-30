@@ -2,9 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity android:name="app.orchard.tv.MainActivity">
+            <!-- CVTE firmware (ro.CVT_EN_COMMON_HOME_INTENT=1) sends Home and boot as MAIN + HOME + COMMON_HOME,
+                 which only matches a filter listing all of them. Kept in this filter, not a second one: a plain
+                 HOME intent still matches, and a second filter would list this activity twice. Reported on
+                 cleanyourtv #1201; not verified on a CVTE set here. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.COMMON_HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <!-- Coocaa's private Home category, which its firmware picks the launcher by (Skyworth

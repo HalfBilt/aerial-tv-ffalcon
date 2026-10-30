@@ -55,6 +55,25 @@ class HomeView(context: Context, private val host: Host) : FrameLayout(context) 
     private val press = Press()
     private val handler = Handler(Looper.getMainLooper())
 
+    /**
+     * How much of the bottom an opaque panel hides whole (Personalize's settled sheet): Home is not
+     * drawn there, under it, with every frame of the panel (the full app's SheetCovers).
+     */
+    var coveredBelow = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        if (coveredBelow <= 0) return super.dispatchDraw(canvas)
+        val saved = canvas.save()
+        canvas.clipRect(0, 0, width, height - coveredBelow)
+        super.dispatchDraw(canvas)
+        canvas.restoreToCount(saved)
+    }
+
     /** The focused tile; [PILL] for the status pill. */
     private var focus = 0
     private var row = 0

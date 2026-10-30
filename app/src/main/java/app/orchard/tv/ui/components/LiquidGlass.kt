@@ -60,7 +60,14 @@ import kotlin.math.roundToInt
  * rounded rect, which holds it.
  */
 fun Modifier.liquidGlass(corner: Dp, bottomCorners: Boolean = true): Modifier = composed {
-    val (frost, under, swap) = rememberFrostSwap(Wallpapers.frosted.takeIf { Wallpapers.backdrop != null })
+    // The glass a panel opened with stays while it is open, unless the wallpaper itself changes
+    // (chosen in Personalize). A moving film that stops as a panel opens gets its glass made again
+    // twice within the next second or so, from a frame near where it stopped and then from that
+    // very frame (LiveWallpaper): followed, the menu's and Control Center's glass changed twice
+    // just after they opened (the owner, Xiaomi MiTV-MFTR0). The next opening takes the newest.
+    val latest = Wallpapers.frosted.takeIf { Wallpapers.backdrop != null }
+    val held = remember(Wallpapers.selectedId, latest == null) { latest }
+    val (frost, under, swap) = rememberFrostSwap(held)
     var at by remember { mutableStateOf(Offset.Zero) }
     var root by remember { mutableStateOf(IntSize.Zero) }
     val shape = if (bottomCorners) RoundedCornerShape(corner) else RoundedCornerShape(topStart = corner, topEnd = corner)

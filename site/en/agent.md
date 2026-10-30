@@ -115,6 +115,7 @@ Run these in PowerShell, with the adb from step 1. Everything inside `adb shell 
    adb shell appops set app.orchard.tv REQUEST_INSTALL_PACKAGES allow
    adb shell appops set app.orchard.tv GET_USAGE_STATS allow
    adb shell appops set app.orchard.tv android:get_usage_stats allow
+   adb shell appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS allow
    adb shell cmd notification allow_listener app.orchard.tv/app.orchard.tv.guard.RevivalListener
    adb shell appops set app.orchard.tv APP_AUTO_START allow
    adb shell appops set app.orchard.tv APP_ASSOC_START allow
@@ -122,6 +123,7 @@ Run these in PowerShell, with the adb from step 1. Everything inside `adb shell 
    adb shell appops set app.orchard.tv ASSOC_START allow
    ```
    The last four app ops exist only on TCL and FFALCON (each firmware knows two of them); elsewhere they fail, which is fine.
+   `ACCESS_RESTRICTED_SETTINGS` exists from Android 13 only: there an app installed from a file may not switch its accessibility service on, and Home Guard kept going off (#811 #829).
 
    Start Aerial once, wait 5 seconds, then compile it (takes up to a minute and makes Aerial run smoothly on the TV; on some TVs the compile only works after Aerial has started once):
    ```
@@ -264,6 +266,7 @@ adb shell appops set app.orchard.tv APP_AUTO_START default
 adb shell appops set app.orchard.tv APP_ASSOC_START default
 adb shell appops set app.orchard.tv AUTO_START default
 adb shell appops set app.orchard.tv ASSOC_START default
+adb shell appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS default
 adb shell am force-stop app.orchard.tv
 adb shell cmd role remove-role-holder --user 0 android.app.role.HOME app.orchard.tv
 ```

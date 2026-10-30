@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import app.orchard.tv.apps.TileSheet
 import app.orchard.tv.settings.AerialSettings
+import app.orchard.tv.settings.Effects
 import app.orchard.tv.system.DeviceProfile
 import app.orchard.tv.system.DiagLog
 import app.orchard.tv.system.HisenseSources
 import app.orchard.tv.system.SystemProbe
 import app.orchard.tv.update.Updates
+import app.orchard.tv.ui.components.DiagLayers
 import app.orchard.tv.ui.components.UhdCanvas
+import app.orchard.tv.wallpaper.AerialQuality
 import app.orchard.tv.wallpaper.ScreensaverMode
 import app.orchard.tv.wallpaper.Wallpapers
 import kotlinx.coroutines.launch
@@ -136,6 +139,22 @@ class ConfigReceiver : BroadcastReceiver() {
         intent.getStringExtra("screensaver")?.let { key ->
             Wallpapers.init(context)
             ScreensaverMode.entries.firstOrNull { it.key == key }?.let { Wallpapers.chooseScreensaver(it) }
+        }
+        // ... --es skip_layers picture,plate   (parts of Home left undrawn until Aerial restarts, to
+        //                                 find what a slow TV's frames cost; see DiagLayers)
+        intent.getStringExtra("skip_layers")?.let { list ->
+            resultData = "skip_layers=" + DiagLayers.skip(list).joinToString(",")
+            return
+        }
+        // ... --es effects auto|full|lite / --es aerial_quality auto|1080p|4k|dolby_vision
+        //                                 (as in Personalize; for comparing frame times of each)
+        intent.getStringExtra("effects")?.let { key ->
+            AerialSettings.init(context)
+            Effects.entries.firstOrNull { it.key == key }?.let(AerialSettings::chooseEffects)
+        }
+        intent.getStringExtra("aerial_quality")?.let { key ->
+            AerialSettings.init(context)
+            AerialQuality.entries.firstOrNull { it.key == key }?.let(AerialSettings::chooseAerialQuality)
         }
         // Opt-in for an input ("*" = any recognized Apple TV input). Empty input disables.
         // Optional player and current-input setting key allow testing other firmware routes.

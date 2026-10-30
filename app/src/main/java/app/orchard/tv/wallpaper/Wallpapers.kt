@@ -329,7 +329,9 @@ object Wallpapers {
                 // Frosted from the picture before the home shading: the glass sits low on the
                 // screen, where the shading is darkest, and would read as a grey slab.
                 val frost = picture?.let(Images::frost)
-                picture?.let(Images::shadeForHome) to frost
+                // A film's picture is its frame as it was, as the film is not shaded (HomeBackground).
+                if (wp?.kind == WallpaperKind.Live || wp?.kind == WallpaperKind.Video) picture to frost
+                else picture?.let(Images::shadeForHome) to frost
             }
             backdrop = bmp?.asImageBitmap()
             frosted = frost?.asImageBitmap()
@@ -355,7 +357,9 @@ object Wallpapers {
             WallpaperKind.Video -> if (videoFrameIsOf(wp.id)) videoFrame.lastModified() else 0L
             else -> 0L
         }
-        return "${wp.id}|$stamp|${screenW}x$screenH|${BuildConfig.VERSION_CODE}"
+        // "clear": a film's picture baked unshaded, not one kept from when it was shaded.
+        val film = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video) "|clear" else ""
+        return "${wp.id}|$stamp|${screenW}x$screenH|${BuildConfig.VERSION_CODE}$film"
     }
 
     /**
@@ -412,22 +416,32 @@ object Wallpapers {
     }
 
     /**
-     * The frame a moving wallpaper film stopped on becomes the wallpaper's picture: shaded, frosted
+     * The frame a moving wallpaper film stopped on becomes the wallpaper's picture: frosted
      * and kept for the next start. Returns once Home has it. [frame] is screen-sized and is used up.
      * It was [atMs] into [film], where the film picks up when it next moves ([liveSpot]).
      */
+    /**
+     * [frame] shows as the picture at once, before [useLiveFrame] has kept and frosted it: the
+     * aerial film let go into an app shows its last frame rather than black (LiveWallpaper).
+     */
+    fun showLiveFrame(frame: Bitmap) {
+        if (!moves()) return
+        backdropJob?.cancel()
+        backdrop = frame.asImageBitmap()
+    }
+
     suspend fun useLiveFrame(frame: Bitmap, film: String, atMs: Long) {
         if (!moves()) return
         val id = selectedId
         backdropJob?.cancel()
         val key = if (isVideo(id)) "video" else "live"
+        if (!isVideo(id)) leftHere = null
         prefs.edit { putString("${key}_film", film).putLong("${key}_at", atMs).remove("${key}_left_film").remove("${key}_left_at") }
         val (bmp, frost) = withContext(Dispatchers.Default) {
             runCatching { (if (isVideo(id)) videoFrame else liveFrame).outputStream().use { frame.compress(Bitmap.CompressFormat.JPEG, 90, it) } }
                 .onFailure { Log.w(TAG, "could not keep the film's frame", it) }
-            // Frosted before shading, which draws on the frame itself.
-            val frost = Images.frost(frame)
-            Images.shadeForHome(frame) to frost
+            // Not shaded, as the film is not (HomeBackground).
+            Images.frost(frame).let { frost -> frame to frost }
         }
         // The frame is both the film's own card and the card that plays them all in turn.
         synchronized(thumbs) { thumbs.remove(id); if (isVideo(id)) { thumbs.remove(VIDEOS); thumbs.remove(VIDEO_PREFIX + film) } }
@@ -451,28 +465,38 @@ object Wallpapers {
 
     /**
      * Where the aerial film was let go with no frame taken, past the picture: Home went behind an
-     * app, or the screensaver played its own films on from the wallpaper's. Without it the film
+     * app, or a screensaver of aerials played on from the wallpaper's film. Without it the film
      * started again from the same picture every time, and the wallpaper never changed (Weibo
      * report, 2026-10-28). Null once the picture has caught up ([useLiveFrame]).
      */
     fun leftLiveSpot(): Pair<String, Long>? {
+        leftHere?.let { return it }
         val film = prefs.getString("live_left_film", null)?.takeIf { it.isNotEmpty() } ?: return null
         return film to prefs.getLong("live_left_at", 0L)
     }
 
-    /** The film starts afresh rather than from where it was let go. */
-    fun forgetLeftLiveSpot() {
-        prefs.edit { remove("live_left_film").remove("live_left_at") }
-    }
+    /**
+     * The newest left spot, ahead of prefs: the screensaver moves it on every second, so Home comes
+     * back on its film and moment, and writes it to prefs only now and then ([leaveLiveFilm]).
+     */
+    @Volatile
+    private var leftHere: Pair<String, Long>? = null
 
-    /** The aerial film was let go at [atMs] into [film] with no frame taken: it goes on from there. */
-    fun leaveLiveFilm(film: String, atMs: Long) {
-        if (selectedId != LIVE) return
+    /**
+     * The aerial film was let go at [atMs] into [film] with no frame taken: it goes on from there.
+     * Not [persist]ed: kept in memory only, for a screensaver that reports where it is every second.
+     */
+    fun leaveLiveFilm(film: String, atMs: Long, persist: Boolean = true) {
+        // Kept whatever the wallpaper: a screensaver of aerials over another one leaves its film
+        // here too, so the aerial wallpaper chosen later begins on it (AerialSet).
+        if (!persist) { leftHere = film to atMs; return }
         val picture = livePictureSpot()
         // Let go where the picture is (stopped there, or never moved): nothing to catch up.
         if (picture != null && picture.first == film && abs(picture.second - atMs) < SAME_SPOT_MS) {
+            leftHere = null
             prefs.edit { remove("live_left_film").remove("live_left_at") }
         } else {
+            leftHere = film to atMs
             prefs.edit { putString("live_left_film", film).putLong("live_left_at", atMs) }
         }
     }

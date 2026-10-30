@@ -381,6 +381,9 @@ class Personalize(
     private val phoneBody = TextView(context)
     private val phoneUrl = TextView(context)
 
+    /** How much of the screen's bottom the sheet hides whole once in: its height less its round top corners. */
+    val covers = Ui.pxi(360f - 30f)
+
     init {
         val sheetH = Ui.px(360f)
         val panel = GlassBox(context, 30f, bottomCorners = false)

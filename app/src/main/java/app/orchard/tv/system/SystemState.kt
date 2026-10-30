@@ -3,6 +3,7 @@ package app.orchard.tv.system
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.tv.TvContract
@@ -263,6 +264,7 @@ object SystemProbe {
         val wired = listOfNotNull(Intent("com.xiaomi.mitv.settings.ETHERNET_SETTINGS").setPackage("com.xiaomi.mitv.settings").takeIf { ethernet })
         return allResolvable(
             context,
+            *listOfNotNull(hisenseNetworkSettingsIntent(context)).toTypedArray(),
             *wired.toTypedArray(),
             Intent("com.xiaomi.mitv.settings.WIFI_SETTINGS").setComponent(ComponentName("com.xiaomi.mitv.settings", "com.xiaomi.mitv.settings.wifi.MitvWifiActivity")),
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.android.tv.settings", "com.android.tv.settings.connectivity.NetworkActivity")),
@@ -275,6 +277,16 @@ object SystemProbe {
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
             WHALEY_SETTINGS,
         )
+    }
+
+    // Hisense H55E9A (Android 8): the OEM connection panel works, while the leftover AOSP
+    // NetworkActivity can crash in its subpages (#760). Other TVs keep their existing order.
+    private fun hisenseNetworkSettingsIntent(context: Context): Intent? {
+        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).setComponent(
+            ComponentName("com.android.tv.settings", "com.hisense.systemsettings.MainActivity"),
+        )
+        val info = runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo }.getOrNull()
+        return intent.takeIf { info != null && info.exported && info.enabled && info.applicationInfo.enabled }
     }
 
     private val XGIMI_SETTINGS = ComponentName("com.android.newsettings", "com.xgimi.newsettings.SettingService")
@@ -553,8 +565,8 @@ object SystemProbe {
 
     /** Lists framework inputs first, then known manufacturer-specific input integrations. */
     fun sources(context: Context): List<TvSource> = frameworkSources(context)
+        .let { listed -> (listed + xiaomiSources(context, listed)).sortedWith(compareBy({ it.kind.ordinal }, { it.label })) }
         .ifEmpty { XgimiMstarSources.load(context) }
-        .ifEmpty { xiaomiSources(context) }
         .ifEmpty { HisenseSources.load(context) }
         .ifEmpty { KonkaSources.load(context) }
         .ifEmpty { tclSources(context) }
@@ -602,7 +614,7 @@ object SystemProbe {
         val profile = DeviceProfile.current(context)
 
         return infos
-            .filter { it.parentId == null && (it.isPassthroughInput || it.type == TvInputInfo.TYPE_TUNER) }
+            .filter { it.parentId == null && (it.isPassthroughInput || it.type == TvInputInfo.TYPE_TUNER && fromSystem(it)) }
             .filter { Build.VERSION.SDK_INT < 24 || runCatching { !it.isHidden(context) }.getOrDefault(true) }
             .filter { info -> withHidden || hw(info.id).let { it == null || it !in profile.hiddenHardware } }
             .mapNotNull { info ->
@@ -644,6 +656,17 @@ object SystemProbe {
             .let { tunersApart(context, it) }
             .sortedWith(compareBy({ it.kind.ordinal }, { it.label }))
     }
+
+    /**
+     * Whether a tuner input belongs to the TV rather than to an app the owner installed. VLC
+     * registers a tuner-type input for its preview channels; listed as the only input, it kept
+     * the Xiaomi player's HDMI ports from showing (MiTV-MFTP0, Android 9, issue #882). Hardware
+     * inputs come from system packages on every TV seen.
+     */
+    private fun fromSystem(info: TvInputInfo): Boolean = runCatching {
+        info.serviceInfo.applicationInfo.flags and
+            (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    }.getOrDefault(true)
 
     /**
      * Two tuners under one name, told apart by their services: Sony BRAVIA 4K AE2 (Android 14) has
@@ -737,35 +760,46 @@ object SystemProbe {
     }
 
     /**
-     * Old Xiaomi firmwares with no tv_input service at all (MiTV4C / L32M5-AD, MStar "mainz",
-     * Android 6, issue #665): TvInputManager refuses the list, and the firmware's own player is the
-     * only way to switch. Its source ids there are 23 = HDMI 1 and 24 = HDMI 2, as the reporter
-     * found port by port; not tried here, and other models may have other ports, so only these.
-     * Mi TV 3 (MiTV3, MStar "inception", Android 5.1.1) has the service but lists nothing; 23 and 24
-     * are its HDMI 1 and 2 too (L60M4-AA, the reporter of issue #309 switched both with adb; #787
-     * is the same model string with no inputs in its diagnostics).
+     * Xiaomi TVs whose framework lists no HDMI input, switched through the firmware's own player.
+     * Old firmwares with no tv_input service at all (MiTV4C / L32M5-AD, MStar "mainz", Android 6,
+     * issue #665): its source ids there are 23 = HDMI 1 and 24 = HDMI 2, as the reporter found
+     * port by port. Mi TV 3 (MiTV3, MStar "inception", Android 5.1.1) has the service but lists
+     * nothing; 23–25 are its HDMI 1–3 (#309, #787, switched with adb by the reporters). Mi TV 2
+     * (MiTV2-55, MStar, Android 5.1.1) the same: 23 opened HDMI 1, 24 and 25 were accepted (#599).
+     * Mi TV 4 on firmware 20.3.6 (MiTV4-ANSM0, Amlogic, Android 6.0.1) lists only its ATV and DTV
+     * tuners (#874); the player's hdmiN_order says which id each port has where the firmware has
+     * one (PR #571), else 23 counts up from HDMI 1 as on the others. Not on boxes, which have
+     * no HDMI inputs, and only for the ports the TV can have: two on MiTV4C, three elsewhere.
      * CLEAR_TOP: a player task left in the background is otherwise only brought to the front, and
      * the new `input` is dropped, so going from one port to the other seemed to do nothing.
      */
-    private fun xiaomiSources(context: Context): List<TvSource> {
-        if (Build.MODEL !in XIAOMI_NO_INPUT_MODELS || !isInstalled(context, XIAOMI_PLAYER)) return emptyList()
-        val tim = context.getSystemService<TvInputManager>()
-        if (tim != null && runCatching { tim.tvInputList }.getOrNull().orEmpty().isNotEmpty()) return emptyList()
-        fun source(id: Int, label: String, kind: SourceKind) = TvSource(
-            id = "xiaomi:$id",
-            label = label,
-            kind = kind,
-            connected = false,
-            deviceName = null,
-            intent = Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY")
-                .setComponent(ComponentName(XIAOMI_PLAYER, "$XIAOMI_PLAYER.ExternalSourceActivity"))
-                .putExtra("input", id)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-        )
-        return listOf(source(23, "HDMI 1", SourceKind.Hdmi), source(24, "HDMI 2", SourceKind.Hdmi))
+    private fun xiaomiSources(context: Context, framework: List<TvSource>): List<TvSource> {
+        if (framework.any { it.kind == SourceKind.Hdmi } || !isInstalled(context, XIAOMI_PLAYER)) return emptyList()
+        val characteristics = prop("ro.build.characteristics").orEmpty()
+        if ("stb" in characteristics || "mbx" in characteristics) return emptyList()
+        val player = ComponentName(XIAOMI_PLAYER, "$XIAOMI_PLAYER.ExternalSourceActivity")
+        if (runCatching { context.packageManager.getActivityInfo(player, 0) }.isFailure) return emptyList()
+        val ports = if (Build.MODEL == "MiTV4C") 2 else 3
+        return (1..ports).map { port ->
+            val input = xiaomiConfiguredSource("HDMI $port") ?: (22 + port)
+            TvSource(
+                // The id home-screen tiles keep: the player's number, as in 1.68.
+                id = "xiaomi:$input",
+                label = "HDMI $port",
+                kind = SourceKind.Hdmi,
+                connected = false,
+                deviceName = null,
+                intent = Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY")
+                    .setComponent(player)
+                    .putExtra("input", input)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            )
+        }
     }
 
-    private val XIAOMI_NO_INPUT_MODELS = setOf("MiTV4C", "MiTV3")
+    private fun prop(key: String): String? = runCatching {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, key) as String
+    }.getOrNull()
 
     private const val WHALEY_PLAYER = "com.whaley.tv.tvplayer.ui"
 

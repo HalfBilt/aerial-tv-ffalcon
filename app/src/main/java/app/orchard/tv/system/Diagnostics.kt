@@ -114,7 +114,7 @@ object Diagnostics {
             " WRITE_SETTINGS=${Build.VERSION.SDK_INT < 23 || Settings.System.canWrite(context)}" +
             " install=${Build.VERSION.SDK_INT < 26 || pm.canRequestPackageInstalls()}" +
             " location=${granted(context, Manifest.permission.ACCESS_FINE_LOCATION)}" +
-            " usage=${HomeGuardService.usageStatsAllowed(context)}")
+            " usage=${HomeGuardService.usageStatsAllowed(context)}" + restrictedSettings(context))
         appendLine("ADB         adb_enabled=${global(context, Settings.Global.ADB_ENABLED)} keep_adb=${GuardSetup.keepAdb(context)} guard_off_in_standby=${GuardSetup.offInStandby(context)}")
         appendLine("Screensaver enabled=${secure(context, "screensaver_enabled")} components=${secure(context, "screensaver_components")} Aerial's=${Wallpapers.screensaver}")
         appendLine("Sounds      sound_effects_enabled=${system(context, Settings.System.SOUND_EFFECTS_ENABLED)}")
@@ -122,6 +122,9 @@ object Diagnostics {
         appendLine("Compiled    ${compiled(context)}")
         appendLine("Frames      ${FrameStats.summary()}")
         appendLine("Settings    focus=${AerialSettings.focusStyle.key} one_row=${AerialSettings.oneRowHome} columns=${AerialSettings.homeColumns} peek=${AerialSettings.peekNextRow} names=${AerialSettings.showAllNames} boot_source=${AerialSettings.bootSource != null} boot_app=${AerialSettings.bootApp}")
+        runCatching { app.orchard.tv.wallpaper.AerialStream.usage(context) }.getOrNull()?.let { (used, limit) ->
+            appendLine("Aerials     quality=${AerialSettings.aerialQuality.key} films=${app.orchard.tv.wallpaper.AerialSet.films(context).joinToString(",") { it.id.take(8) }} cache=${used / 1_048_576}/${limit / 1_048_576} MB")
+        }
         appendLine("            wallpaper=${app.orchard.tv.wallpaper.Wallpapers.selectedId.substringBefore('/')} always_moves=${AerialSettings.wallpaperAlwaysMoves} quality=${AerialSettings.aerialQuality.key} weather=${AerialSettings.showWeather} saver_clock=${AerialSettings.screensaverClock}")
         appendLine("```")
 
@@ -216,6 +219,19 @@ object Diagnostics {
         if (Build.VERSION.SDK_INT >= 30) context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
         else context.packageManager.getInstallerPackageName(context.packageName)
     }.getOrNull()
+
+    /**
+     * Android 13+: where Android says the APK came from. 3 is a local file (a USB stick, a file
+     * manager, Aerial's own update before 1.63): such an app gets ACCESS_RESTRICTED_SETTINGS denied
+     * and may not switch its accessibility service on, and Home Guard kept going off on two Android 14
+     * TVs installed that way (issues #811 #829); install.sh allows it. An app cannot read that op
+     * itself (it came out unknown on Xiaomi MiTV-MFTR0), so `adb shell appops get` tells.
+     */
+    private fun restrictedSettings(context: Context): String {
+        if (Build.VERSION.SDK_INT < 33) return ""
+        val source = runCatching { context.packageManager.getInstallSourceInfo(context.packageName).packageSource }.getOrNull()
+        return " package_source=${source ?: "unknown"}"
+    }
 
     private fun granted(context: Context, permission: String) =
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED

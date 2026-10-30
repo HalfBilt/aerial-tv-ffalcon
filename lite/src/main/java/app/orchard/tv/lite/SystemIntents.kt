@@ -36,9 +36,10 @@ object SystemIntents {
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
     )
 
-    // Same OEM entry as SystemProbe, verified on Hisense H55E9A / Android 8 (#760).
+    // Same OEM network category as SystemProbe (#760), not the direct Wi-Fi list.
+    // Sidebar focus verified on H55E9A / Android 8; Android 4.x Lite still needs device verification.
     private fun hisenseNetworkSettingsIntent(context: Context): Intent? {
-        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).setComponent(
+        val intent = Intent("android.settings.NETWORK_SETTINGS").setComponent(
             ComponentName("com.android.tv.settings", "com.hisense.systemsettings.MainActivity"),
         )
         val info = runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo }.getOrNull()

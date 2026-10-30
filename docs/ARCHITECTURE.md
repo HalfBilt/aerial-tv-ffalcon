@@ -284,8 +284,9 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 
 - **信号源**：`TvInputManager` 列出直通输入和调谐器（调谐器只认系统包的：VLC 给预览频道注册的调谐器类输入不算，#882）。小米电视（不含 `ro.build.characteristics` 带 stb / mbx 的盒子）系统一个 HDMI 都没列时，用小米播放器补 HDMI 1–3（MiTV4C 两个），编号先读 `hdmiN_order`，没有就 22 + 口号，id 仍是 `xiaomi:<编号>`（#874 #599）。装了 `com.xiaomi.mitv.tvplayer` 的走小米的 Intent（HDMI 的 `input = HW 编号 + 18`，AV=2，ATV/DTMB 各自的 Activity），否则走 `TvContract` 的通用 URI。CEC 子输入的名字用于显示设备名，`Playback_1` 这类通用名会被过滤。`DeviceProfile` 存放按机型的修正，见下面「机型修正」。
 - **网络设置入口**：海信的 `com.android.tv.settings/com.hisense.systemsettings.MainActivity`
-  存在、启用且导出时，优先用 `ACTION_WIFI_SETTINGS` 打开海信自己的 Wi-Fi 页，避开固件残留的
-  Android TV 网络页（#760，H55E9A / Android 8）。其他电视的原有候选顺序和完整版的失败回退不变，
+  存在、启用且导出时，优先用固件声明的 `android.settings.NETWORK_SETTINGS` 打开海信网络分类，
+  显示左侧菜单并选中网络，不直接进入 Wi-Fi 列表，同时避开固件残留的 Android TV 网络页
+  （#760，H55E9A / Android 8 上普通应用权限实测）。其他电视的原有候选顺序和完整版的失败回退不变，
   Lite 同步这个入口；验证边界见 `docs/devices/hisense-vidaa.md`。
 - **音量**：`AudioManager` 的 STREAM_MUSIC；TCL 必须加 `FLAG_SHOW_UI`（否则不会写入功放）。
 - **亮度**：见 `Brightness.kt` 的注释（小米 / 标准 / TCL 面板三种）。

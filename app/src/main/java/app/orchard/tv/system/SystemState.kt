@@ -284,8 +284,10 @@ object SystemProbe {
 
     // Hisense H55E9A (Android 8): the OEM connection panel works, while the leftover AOSP
     // NetworkActivity can crash in its subpages (#760). Other TVs keep their existing order.
+    // Use the OEM network category action, not WIFI_SETTINGS which opens the Wi-Fi list directly.
+    // NETWORK_SETTINGS opens the sidebar focused on Network, verified from a plain app on H55E9A.
     private fun hisenseNetworkSettingsIntent(context: Context): Intent? {
-        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).setComponent(
+        val intent = Intent("android.settings.NETWORK_SETTINGS").setComponent(
             ComponentName("com.android.tv.settings", "com.hisense.systemsettings.MainActivity"),
         )
         val info = runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo }.getOrNull()

@@ -776,8 +776,7 @@ object SystemProbe {
      */
     private fun xiaomiSources(context: Context, framework: List<TvSource>): List<TvSource> {
         if (framework.any { it.kind == SourceKind.Hdmi } || !isInstalled(context, XIAOMI_PLAYER)) return emptyList()
-        val characteristics = prop("ro.build.characteristics").orEmpty()
-        if ("stb" in characteristics || "mbx" in characteristics) return emptyList()
+        if (isBox()) return emptyList()
         val player = ComponentName(XIAOMI_PLAYER, "$XIAOMI_PLAYER.ExternalSourceActivity")
         if (runCatching { context.packageManager.getActivityInfo(player, 0) }.isFailure) return emptyList()
         val ports = if (Build.MODEL == "MiTV4C") 2 else 3
@@ -803,6 +802,9 @@ object SystemProbe {
             )
         }
     }
+
+    /** A set-top box rather than a TV: no panel and no HDMI inputs of its own. */
+    fun isBox(): Boolean = prop("ro.build.characteristics").orEmpty().let { "stb" in it || "mbx" in it }
 
     private fun prop(key: String): String? = runCatching {
         Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, key) as String

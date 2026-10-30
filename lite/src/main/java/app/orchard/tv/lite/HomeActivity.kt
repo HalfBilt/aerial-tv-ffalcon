@@ -153,11 +153,20 @@ class HomeActivity : Activity(), HomeView.Host {
         }
     }
 
+    /** Keys whose press came here and which have not been lifted yet. */
+    private val keysDown = HashSet<Int>()
+
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         resetIdle()
+        // A lift whose press never reached us still wakes the screensaver: some remotes' keys are
+        // pressed for a vendor hotkey service and only lifted for the app (Coocaa C10, issue #915).
+        val loneLift = e.action == KeyEvent.ACTION_UP && !e.isCanceled && !keysDown.contains(e.keyCode)
+        if (e.action == KeyEvent.ACTION_DOWN) keysDown.add(e.keyCode) else keysDown.remove(e.keyCode)
         if (saver != null) {
             if (e.action == KeyEvent.ACTION_DOWN) {
                 swallow = e.keyCode
+                hideSaver()
+            } else if (loneLift) {
                 hideSaver()
             }
             return true

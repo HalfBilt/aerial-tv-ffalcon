@@ -45,6 +45,7 @@ import app.orchard.tv.wallpaper.Aerials
 import app.orchard.tv.wallpaper.ScreensaverMode
 import app.orchard.tv.wallpaper.Wallpapers
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -166,6 +167,8 @@ fun LiveWallpaper(
     panel: Boolean = false,
     /** A screensaver is up in another format than the film's (Dolby Vision chosen): the TV goes black between them. */
     otherFormatSaver: Boolean,
+    /** When a key was last pressed (uptimeMillis): a slow copy of the stopped film waits for quiet. Read, not observed. */
+    lastInputAt: () -> Long = { 0L },
     live: LiveFilm,
 ) {
     val context = LocalContext.current
@@ -173,7 +176,7 @@ fun LiveWallpaper(
     var surface by remember { mutableStateOf<SurfaceView?>(null) }
     // Frames are reaching the screen: the first one has been drawn and the film is not stopped.
     var showing by remember { mutableStateOf(false) }
-    val reader = remember { FrameReader(context) }
+    val reader = remember { FilmFrames.load(context); FrameReader(context) }
     // Plays as soon as Home shows it, and keys do not stop it (Wallpapers.keepsMoving).
     val play = moving || hold
     val inSaver by rememberUpdatedState(hold && !moving)
@@ -181,6 +184,7 @@ fun LiveWallpaper(
     val standInNow by rememberUpdatedState(standIn)
     val panelNow by rememberUpdatedState(panel)
     val otherFormatNow by rememberUpdatedState(otherFormatSaver)
+    val lastInputNow by rememberUpdatedState(lastInputAt)
     // Back from a screensaver in another format: the TV goes black as it changes mode whatever
     // shows. The film goes on from the screensaver's film and moment (owner, 2026-10-29), on black:
     // the picture, from before the screensaver, would show another shot first.
@@ -442,6 +446,22 @@ fun LiveWallpaper(
                     }
                     DiagLog.i("wallpaper picture takes over from the stopped film")
                     cover.animateTo(0f, tween(320, easing = Motion.EaseOut))
+                } else if (copySlow && film != null) {
+                    // PixelCopy reads the film but holds Home 0.6-1.7 s, and the film's file jams
+                    // the media server (TCL MT5879, FrameReader). The paused film stays while Home
+                    // shows it plainly; once no key has come for KEEP_STOPPED_MS, the copy is made,
+                    // unseen, and becomes the picture. Left first: the picture stays as it was.
+                    val idle = untilQuietOrLeft({ standInNow && keepNow }, lastInputNow)
+                    val copy = if (idle) surface?.let { captureOnce(it) } else null
+                    if (copy != null) Wallpapers.useLiveFrame(copy, film, at)
+                    if (!keepNow) {
+                        live.stopped = false
+                        if (!otherFormatNow && !AerialStart.running) cover.snapTo(0f)
+                        release()
+                        return@LaunchedEffect
+                    }
+                    DiagLog.i(if (copy != null) "wallpaper picture copied from the film left quiet" else "wallpaper film: no frame; back to the last picture")
+                    cover.animateTo(0f, tween(if (copy != null) 320 else 600, easing = Motion.EaseOut))
                 } else {
                     DiagLog.i("wallpaper film: no frame copied; back to the last picture")
                     cover.animateTo(0f, tween(600, easing = Motion.EaseOut))
@@ -539,6 +559,29 @@ private var copyLostColour = false
  * The plate may come up over the stopped film: two frames on, once Home's plate has taken the
  * new glass while still out of sight, rather than fading it in over the last film's.
  */
+/**
+ * Waits until no key has come for [KEEP_STOPPED_MS] ([lastInputAt], uptimeMillis), true, or until
+ * [showing] turns false first (an app or a frosting panel over Home), false.
+ */
+private suspend fun untilQuietOrLeft(showing: () -> Boolean, lastInputAt: () -> Long): Boolean = kotlinx.coroutines.coroutineScope {
+    val left = async { snapshotFlow { showing() }.first { !it }; false }
+    val quiet = async {
+        while (true) {
+            val since = android.os.SystemClock.uptimeMillis() - lastInputAt()
+            if (since >= KEEP_STOPPED_MS) break
+            delay(KEEP_STOPPED_MS - since)
+        }
+        true
+    }
+    kotlinx.coroutines.selects.select<Boolean> {
+        left.onAwait { it }
+        quiet.onAwait { it }
+    }.also {
+        left.cancel()
+        quiet.cancel()
+    }
+}
+
 private suspend fun glassReady(live: LiveFilm) {
     withFrameNanos { }
     withFrameNanos { }
@@ -678,12 +721,12 @@ private suspend fun captureOnce(view: SurfaceView, w: Int = view.width, h: Int =
     }
     // The copy is made on the render thread, which the main thread waits on to draw: asked from
     // another thread, a 4K copy still held keys up 0.6 s (TCL MT5879). A copy this slow is the
-    // last: the film's file serves from then on, decoded off the render thread, as where the
-    // copy comes back black. The film is paused when that matters, so decoding beside it is free.
+    // last, kept for the TV's next starts too (FilmFrames): the film's file is not read there
+    // either (FrameReader), and the glass goes without the film's frames (Wallpapers.filmGlassless).
     val took = android.os.SystemClock.elapsedRealtime() - started
     if (result == PixelCopy.SUCCESS && took > COPY_SLOW_MS) {
-        DiagLog.i("wallpaper frame copy took $took ms; the film's file from now on")
-        copySlow = true
+        DiagLog.i("wallpaper frame copy took $took ms; no frames of the film from now on but a quiet one")
+        FilmFrames.copyWasSlow()
     }
     val unread = if (result == PixelCopy.SUCCESS) unreadable(bitmap) else null
     if (unread == "green") copyLostColour = true
@@ -693,21 +736,90 @@ private suspend fun captureOnce(view: SurfaceView, w: Int = view.width, h: Int =
 
 /**
  * Frames of the film on screen, from its 1080p H.264 file, for TVs whose video plane PixelCopy
- * cannot read (Xiaomi MiTV-MFTR0, MStar: the copy comes back black). One MediaMetadataRetriever is
- * opened on the film while it plays: opening is most of the cost (a connection to Apple, then the
- * index at the end of the file), 1.4 to 6.6 s on MFTR0 when it was done only once the film stopped.
- * Open, a frame is the stretch of file it needs and a decode. One thread, as the retriever is not
- * safe to share; each call fetches only the index and the stretch it needs.
+ * cannot read (Xiaomi MiTV-MFTR0, MStar: the copy comes back black) or reads too slowly (TCL MT5879).
+ * One MediaMetadataRetriever is opened on the film while it plays: opening is most of the cost (a
+ * connection to Apple, then the index at the end of the file), 1.4 to 6.6 s on MFTR0 when it was
+ * done only once the film stopped. Open, a frame is the stretch of file it needs and a decode. One
+ * thread, as the retriever is not safe to share; each call fetches only the index and the stretch it needs.
+ *
+ * A call that does not return in [DECODE_TIMEOUT_MS] is left behind with its thread and retriever,
+ * and the next call gets a new pair: on TCL MT5879 a frame never came back, every call after it
+ * waited behind it, and the picture and the glass stayed on a frame minutes old while the paused
+ * film showed another (2026-10-30). A timeout around the call alone could not end that wait: the
+ * call blocks its thread and cannot be cancelled.
+ *
+ * One left behind and the file is not read again until the TV restarts ([FileFramesStuck]). The
+ * retriever runs in the media server, whose retrievers all wait on one lock: on TCL MT5879 a frame
+ * stuck inside TCL's own MP4 extractor (TclMPEG4Extractor, waiting on a feed that never came) held
+ * it, every later frame queued behind it, and once a new reader was tried after each one (the first
+ * version of this, 2026-10-30), 17 of the server's binder threads were stuck. Then MediaCodecList,
+ * which asks the media server, held Home's main thread at its start: black Home, ANRs, until the TV
+ * restarted. Stock 1.69 had stuck there once as well (one call, Apple's host slow). Opening the
+ * file still worked; every frame stuck, playing or paused.
  */
 private class FrameReader(private val context: android.content.Context) {
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private val thread = Dispatchers.IO.limitedParallelism(1)
-    private var retriever: MediaMetadataRetriever? = null
-    private var openFor: String? = null
+    /** A thread and the retriever opened on it. Its thread goes after a while idle. */
+    private class Worker {
+        val executor = java.util.concurrent.ThreadPoolExecutor(
+            0, 1, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.LinkedBlockingQueue(),
+        ) { Thread(it, "film-frames").apply { isDaemon = true } }
+        var retriever: MediaMetadataRetriever? = null
+        var openFor: String? = null
+        @Volatile var abandoned = false
+
+        fun close() {
+            retriever?.let { runCatching { it.release() } }
+            retriever = null
+            openFor = null
+        }
+    }
+
+    @Volatile private var worker = Worker()
+
+    /** Whether the retriever has refused an address here, so files go [RangedHttpSource]'s way. */
+    @Volatile private var urlRefused = false
+
+    /**
+     * [block] on the worker's thread, or null after [DECODE_TIMEOUT_MS], when the worker is left
+     * behind. The caller cancelled returns at once, and the block finishes unseen.
+     */
+    private suspend fun <T : Any> onWorker(what: String, block: (Worker) -> T?): T? {
+        // Where PixelCopy reads the film, if slowly, the file is not used: on TCL MT5879 its frames
+        // jammed the media server (above). Its frame waits for quiet instead (LiveWallpaper).
+        if (copySlow || FileFramesStuck.now(context)) return null
+        val w = worker
+        val result = kotlinx.coroutines.CompletableDeferred<T?>()
+        val started = android.os.SystemClock.elapsedRealtime()
+        try {
+            w.executor.execute { result.complete(if (w.abandoned) null else block(w)) }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            return null
+        }
+        val value = withTimeoutOrNull(DECODE_TIMEOUT_MS) { result.await() }
+        if (value == null && !result.isCompleted) abandon(w, what, started)
+        return value
+    }
+
+    private fun abandon(w: Worker, what: String, started: Long) {
+        synchronized(this) {
+            if (worker !== w) return
+            worker = Worker()
+        }
+        w.abandoned = true
+        FileFramesStuck.mark(context)
+        FilmFrames.update()
+        DiagLog.i("wallpaper film file stuck ($what, ${android.os.SystemClock.elapsedRealtime() - started} ms); not read again until the TV restarts")
+        // Its retriever goes once the call stuck on it returns, if it ever does; what queued behind
+        // it returns null at once.
+        runCatching {
+            w.executor.execute { w.close() }
+            w.executor.shutdown()
+        }
+    }
 
     /** Opens [id] ahead, unless it is open already. */
     suspend fun open(id: String) {
-        withContext(thread) { retrieverFor(id) }
+        onWorker("open") { retrieverFor(it, id) }
     }
 
     /**
@@ -715,24 +827,24 @@ private class FrameReader(private val context: android.content.Context) {
      * decoding beyond itself: the [nearest] one, or else the one at or before it. Null after [DECODE_TIMEOUT_MS] or on failure.
      */
     suspend fun frame(id: String, atMs: Long, w: Int, h: Int, exact: Boolean, quiet: Boolean = false, nearest: Boolean = false): Bitmap? {
+        // Not read here at all (onWorker): no line for each frame not had.
+        if (copySlow || FileFramesStuck.now(context)) return null
         val started = android.os.SystemClock.elapsedRealtime()
-        val frame = withTimeoutOrNull(DECODE_TIMEOUT_MS) {
-            withContext(thread) {
-                val mmr = retrieverFor(id) ?: return@withContext null
-                try {
-                    val us = atMs * 1000
-                    val option = when {
-                        exact -> MediaMetadataRetriever.OPTION_CLOSEST
-                        nearest -> MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                        else -> MediaMetadataRetriever.OPTION_PREVIOUS_SYNC
-                    }
-                    if (Build.VERSION.SDK_INT >= 27) mmr.getScaledFrameAtTime(us, option, w, h)
-                    else mmr.getFrameAtTime(us, option)
-                } catch (e: Exception) {
-                    DiagLog.i("wallpaper frame decode failed: ${e.javaClass.simpleName}")
-                    close0()
-                    null
+        val frame = onWorker("frame") { wk ->
+            val mmr = retrieverFor(wk, id) ?: return@onWorker null
+            try {
+                val us = atMs * 1000
+                val option = when {
+                    exact -> MediaMetadataRetriever.OPTION_CLOSEST
+                    nearest -> MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                    else -> MediaMetadataRetriever.OPTION_PREVIOUS_SYNC
                 }
+                if (Build.VERSION.SDK_INT >= 27) mmr.getScaledFrameAtTime(us, option, w, h)
+                else mmr.getFrameAtTime(us, option)
+            } catch (e: Exception) {
+                DiagLog.i("wallpaper frame decode failed: ${e.javaClass.simpleName}")
+                wk.close()
+                null
             }
         }
         if (!quiet || frame == null) DiagLog.i("wallpaper ${if (exact) "frame" else if (nearest) "key frame" else "glass frame"} decoded: ${frame != null} in ${android.os.SystemClock.elapsedRealtime() - started} ms")
@@ -752,13 +864,13 @@ private class FrameReader(private val context: android.content.Context) {
 
     /** Lets the file go; the next frame opens it again. */
     fun close() {
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        kotlinx.coroutines.GlobalScope.launch(thread) { close0() }
+        val w = worker
+        runCatching { w.executor.execute { w.close() } }
     }
 
-    private fun retrieverFor(id: String): MediaMetadataRetriever? {
-        if (openFor == id) retriever?.let { return it }
-        close0()
+    private fun retrieverFor(w: Worker, id: String): MediaMetadataRetriever? {
+        if (w.openFor == id) w.retriever?.let { return it }
+        w.close()
         val film = Aerials.all(context).firstOrNull { it.id == id } ?: return null
         val url = AerialStream.url(film, AerialQuality.Hd, Build.VERSION.SDK_INT < Build.VERSION_CODES.N)
         val started = android.os.SystemClock.elapsedRealtime()
@@ -770,13 +882,15 @@ private class FrameReader(private val context: android.content.Context) {
             open(url, ranged = true) ?: return null
         }
         DiagLog.i("wallpaper film file opened${if (urlRefused) " through the app" else ""} in ${android.os.SystemClock.elapsedRealtime() - started} ms")
-        retriever = mmr
-        openFor = id
+        // Left behind while it opened: this one goes too, as nothing will use it.
+        if (w.abandoned) {
+            runCatching { mmr.release() }
+            return null
+        }
+        w.retriever = mmr
+        w.openFor = id
         return mmr
     }
-
-    /** Whether the retriever has refused an address here, so files go [RangedHttpSource]'s way. */
-    private var urlRefused = false
 
     private fun open(url: String, ranged: Boolean): MediaMetadataRetriever? {
         val mmr = MediaMetadataRetriever()
@@ -790,15 +904,72 @@ private class FrameReader(private val context: android.content.Context) {
             null
         }
     }
-
-    private fun close0() {
-        retriever?.let { runCatching { it.release() } }
-        retriever = null
-        openFor = null
-    }
 }
 
 private const val DECODE_TIMEOUT_MS = 10_000L
+
+/**
+ * What this TV allows for the film's frames, kept across starts: a PixelCopy found slow stays slow
+ * on the same firmware, so the next start neither tries it (another 0.6-1.7 s held, TCL MT5879) nor
+ * shows the frosted glass of an old frame meanwhile. Sets [Wallpapers.filmGlassless].
+ */
+private object FilmFrames {
+    @Volatile private var app: android.content.Context? = null
+
+    fun load(context: android.content.Context) {
+        if (app != null) return
+        val c = context.applicationContext
+        app = c
+        if (prefs(c).getString(SLOW_KEY, null) == Build.FINGERPRINT) {
+            copySlow = true
+            pixelCopy = false
+        }
+        update()
+    }
+
+    fun copyWasSlow() {
+        copySlow = true
+        app?.let { prefs(it).edit().putString(SLOW_KEY, Build.FINGERPRINT).apply() }
+        update()
+    }
+
+    fun update() {
+        val c = app ?: return
+        Wallpapers.filmGlassless = copySlow || FileFramesStuck.now(c)
+    }
+
+    private fun prefs(context: android.content.Context) = context.getSharedPreferences("wallpaper_frames", android.content.Context.MODE_PRIVATE)
+    private const val SLOW_KEY = "copy_slow"
+}
+
+/**
+ * Whether a frame of the film's file has stuck since the TV started (see FrameReader): the media
+ * server stays stuck until then, and every frame asked of it adds a thread to the stuck ones. Kept
+ * on disk, so Home started again in the same boot does not ask.
+ */
+private object FileFramesStuck {
+    @Volatile private var stuck: Boolean? = null
+
+    fun now(context: android.content.Context): Boolean =
+        stuck ?: (prefs(context).getLong(KEY, Long.MIN_VALUE) == bootId(context)).also { stuck = it }
+
+    fun mark(context: android.content.Context) {
+        stuck = true
+        prefs(context).edit().putLong(KEY, bootId(context)).apply()
+    }
+
+    /** The boot count where the TV keeps one (Android 7.0+), else the minute the TV started. */
+    private fun bootId(context: android.content.Context): Long {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val count = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+            if (count >= 0) return count.toLong()
+        }
+        return -(System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()) / 60_000L
+    }
+
+    private fun prefs(context: android.content.Context) = context.getSharedPreferences("wallpaper_frames", android.content.Context.MODE_PRIVATE)
+    private const val KEY = "stuck_boot"
+}
 
 /**
  * A film file read over HTTP by the app, for a retriever that will not open the address itself:

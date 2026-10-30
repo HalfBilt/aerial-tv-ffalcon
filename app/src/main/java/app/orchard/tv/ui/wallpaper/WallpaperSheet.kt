@@ -452,7 +452,10 @@ private fun wallpaperNote(wp: Wallpaper): String? = when {
 @Composable
 private fun WallpaperCard(wp: Wallpaper, focusRequester: FocusRequester?, onFocused: () -> Unit) {
     val selected = Wallpapers.selectedId == wp.id
-    val thumb by produceState<ImageBitmap?>(null, wp.id, Wallpapers.items) {
+    // A moving wallpaper's card is made again when the frame it stopped on changes, also while the
+    // sheet is open: the film stopped as the sheet opened is decoded seconds later (Xiaomi MiTV-MFTR0).
+    val picture = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video) Wallpapers.pictureVersion else 0
+    val thumb by produceState<ImageBitmap?>(null, wp.id, Wallpapers.items, picture) {
         value = withContext(Dispatchers.Default) { Wallpapers.thumbnail(wp.id)?.asImageBitmap() }
     }
     Pressable(onClick = { Wallpapers.select(wp.id) }, focusRequester = focusRequester, focusedScale = 1.08f) { state ->

@@ -156,6 +156,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private var loadJob: Job? = null
 
+    /** A tile picture set or removed from the phone page; see CustomIcons.onChange; before init, which registers it. */
+    private val customIconsChanged: () -> Unit = {
+        DiagLog.i("custom icons changed; reloading Home")
+        reload()
+    }
+
     init {
         AppCatalog.renameFolder = ::renameFolder
         AppCatalog.pinSource = ::pinSourceById
@@ -167,7 +173,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             for (level in brightnessSteps) SystemProbe.setXgimiBrightnessLevel(level)
         }
         // A tile picture set or removed from the phone page.
-        viewModelScope.launch { snapshotFlow { CustomIcons.version }.drop(1).collect { reload() } }
+        CustomIcons.onChange(customIconsChanged)
         // Library pictures that arrived, or the library turned on or off.
         viewModelScope.launch { snapshotFlow { IconLibrary.version }.drop(1).collect { reload() } }
         offerSetupOnce()
@@ -592,6 +598,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        CustomIcons.removeOnChange(customIconsChanged)
         if (AppCatalog.renameFolder == ::renameFolder) AppCatalog.renameFolder = null
         if (AppCatalog.pinSource == ::pinSourceById) AppCatalog.pinSource = null
         if (AppCatalog.layout === layoutOps) AppCatalog.layout = null

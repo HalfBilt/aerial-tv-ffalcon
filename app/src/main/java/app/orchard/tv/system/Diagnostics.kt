@@ -66,11 +66,7 @@ object Diagnostics {
         // The compiled code beside the APK: a few hundred KB when only verified (interpreted), several
         // MB when compiled (TCL MT5879, Android 11, "speed": the profile state is not readable there).
         // The oat folder cannot be listed by the app, only opened by name.
-        val oat = runCatching {
-            val dir = java.io.File(java.io.File(context.applicationInfo.sourceDir).parentFile, "oat")
-            listOf("arm", "arm64", "x86", "x86_64").map { java.io.File(dir, "$it/base.odex") }
-                .firstOrNull { it.exists() }?.let { it.length() / 1024 }
-        }.getOrNull()
+        val oat = app.orchard.tv.update.SelfCompile.odexBytes(context)?.div(1024)
         return "$profile; odex ${oat?.let { "$it KB" } ?: "-"}"
     }
 
@@ -120,7 +116,7 @@ object Diagnostics {
         appendLine("Screensaver enabled=${secure(context, "screensaver_enabled")} components=${secure(context, "screensaver_components")} Aerial's=${Wallpapers.screensaver}")
         appendLine("Sounds      sound_effects_enabled=${system(context, Settings.System.SOUND_EFFECTS_ENABLED)}")
         appendLine("Effects     ${AerialSettings.effects.key}, lite=${AerialSettings.lite}; ${DeviceClass.describe(context)}")
-        appendLine("Compiled    ${compiled(context)}")
+        appendLine("Compiled    ${compiled(context)}; self compile ${app.orchard.tv.update.SelfCompile.diagnostics(context)}")
         appendLine("Frames      ${FrameStats.summary()}")
         appendLine("Settings    focus=${AerialSettings.focusStyle.key} one_row=${AerialSettings.oneRowHome} columns=${AerialSettings.homeColumns} peek=${AerialSettings.peekNextRow} names=${AerialSettings.showAllNames} boot_source=${AerialSettings.bootSource != null} boot_app=${AerialSettings.bootApp}")
         runCatching { app.orchard.tv.wallpaper.AerialStream.usage(context) }.getOrNull()?.let { (used, limit) ->

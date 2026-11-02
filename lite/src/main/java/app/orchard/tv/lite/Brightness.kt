@@ -91,9 +91,10 @@ object Brightness {
         }
         val pm = context.packageManager
         val picture = listOf(
-            Intent(Settings.ACTION_DISPLAY_SETTINGS),
-            // Older Coocaa (Tianci): picture and sound (5S09_A3, issue #895).
+            // Older Coocaa (Tianci): picture and sound (5S09_A3, 6S58_K6S, issue #895), before the
+            // display action, which those TVs answer with the settings' main page.
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tianci.setting", "com.tianci.setting.activity.PictureSoundSetting")),
+            Intent(Settings.ACTION_DISPLAY_SETTINGS),
         ).firstOrNull { runCatching { pm.resolveActivity(it, 0) }.getOrNull() != null } ?: Intent(Settings.ACTION_DISPLAY_SETTINGS)
         return runCatching { context.startActivity(picture.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
     }

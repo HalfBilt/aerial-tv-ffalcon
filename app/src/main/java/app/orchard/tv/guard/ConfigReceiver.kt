@@ -128,6 +128,8 @@ class ConfigReceiver : BroadcastReceiver() {
             } else null
         }
         if (intent.getBooleanExtra("update_test_self", false)) Updates.testApk = java.io.File(context.applicationInfo.sourceDir)
+        // ... --ez self_compile true   (reinstall the running APK with its dex metadata now, SelfCompile)
+        if (intent.getBooleanExtra("self_compile", false)) app.orchard.tv.update.SelfCompile.runNow(context)
         if (intent.getBooleanExtra("check_update", false)) {
             Updates.init(context)
             Updates.checkIfStale(force = true)

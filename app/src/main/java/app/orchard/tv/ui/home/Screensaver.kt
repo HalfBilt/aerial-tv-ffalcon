@@ -43,6 +43,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import app.orchard.tv.MainActivity
+import app.orchard.tv.system.SystemScreensaver
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -484,7 +486,10 @@ private fun AerialSaver(
         val opened = SystemClock.elapsedRealtime()
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
-                if (!playing) DiagLog.i("first frame of ${player.currentMediaItem?.mediaId} after ${SystemClock.elapsedRealtime() - opened} ms")
+                if (!playing) {
+                    DiagLog.i("first frame of ${player.currentMediaItem?.mediaId} after ${SystemClock.elapsedRealtime() - opened} ms")
+                    SystemScreensaver.dreamFirstFrame()?.let { MainActivity.dreamShowedAfter(context, it) }
+                }
                 playing = true
                 shownAny = true
                 failures = 0

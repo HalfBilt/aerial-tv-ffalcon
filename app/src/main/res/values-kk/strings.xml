@@ -189,6 +189,7 @@
     <string name="cc_update_failed_blocked">Бұл теледидар қолданбаларға басқа қолданбаларды орнатуға рұқсат бермейді. Төмендегі пәрменмен жаңартыңыз.</string>
     <string name="cc_update_failed_signature">Бұл теледидардағы Aerial ресми нұсқадан басқаша қол қойылған, сондықтан оның үстінен жаңартуға болмайды.</string>
     <string name="cc_update_failed_older">Сайтта әзірге жаңа нұсқа жоқ. Кейінірек қайталап көріңіз.</string>
+    <string name="cc_self_compile">Aerial жұмысын тегістеу</string>
     <string name="st_pin">Ата-аналық PIN-код</string>
     <string name="st_pin_off">Өшірулі</string>
     <string name="st_pin_on">Қосулы</string>

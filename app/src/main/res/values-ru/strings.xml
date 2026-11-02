@@ -189,6 +189,7 @@
     <string name="cc_update_failed_blocked">Этот телевизор не позволяет приложениям устанавливать другие приложения. Обновитесь командой ниже.</string>
     <string name="cc_update_failed_signature">Aerial на этом телевизоре подписан иначе, чем официальный, поэтому обновить его поверх нельзя.</string>
     <string name="cc_update_failed_older">Более новой версии на сайте пока нет. Повторите попытку позже.</string>
+    <string name="cc_self_compile">Сделать Aerial плавнее</string>
     <string name="st_pin">Родительский PIN-код</string>
     <string name="st_pin_off">Выкл.</string>
     <string name="st_pin_on">Вкл.</string>

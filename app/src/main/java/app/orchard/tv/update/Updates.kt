@@ -10,6 +10,8 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -178,6 +180,8 @@ object Updates {
      */
     fun install(context: Context) {
         if (install is Install.Downloading) return
+        // A second press while the first session's confirmation is awaited (#1004: two sessions).
+        if (awaiting != null) return
         val app = context.applicationContext
         if (!canInstall(app)) { install = Install.Failed(Failure.NotOfficial); return }
         if (LegacyUpdateStorage.needsPermission(app)) {
@@ -239,6 +243,48 @@ object Updates {
      */
     @RequiresApi(28)
     private fun installBySession(app: Context, file: File, withDm: Boolean = true): Boolean = runCatching {
+        val dm = if (withDm) dexMetadata(file) else null
+        val id = commitSession(app, file, dm, Intent(app, UpdateResult::class.java).putExtra(EXTRA_WITH_DM, dm != null))
+        Log.i(TAG, "install session $id committed for ${file.length()} bytes, dex metadata ${dm?.size ?: "none"}")
+        DiagLog.i("update: session $id, dex metadata ${dm?.size ?: "none"}")
+        // Before Android 12 the system always asks the owner, and says so right after the commit.
+        // From 12 the update may go through without asking, and a session still installing must
+        // not be abandoned, so there only the confirmation page is waited for (onSessionResult).
+        if (Build.VERSION.SDK_INT < 31) awaitSession(app, id, ANSWER_TIMEOUT_MS, "no answer from session $id")
+        true
+    }.getOrElse {
+        if (withDm) {
+            Log.w(TAG, "install session with dex metadata failed; without it", it)
+            installBySession(app, file, withDm = false)
+        } else {
+            Log.w(TAG, "no install session; opening the installer", it)
+            openInstaller(app, app, file)
+        }
+    }
+
+    /**
+     * The running APK over itself with its own dex metadata (SelfCompile): no download, the same
+     * version. Without the metadata it would be pointless, so no fallback: a failure is only logged.
+     * [auto]: nobody asked, so a confirmation page is not put in front of the app being watched.
+     */
+    @RequiresApi(28)
+    internal fun reinstallSelf(app: Context, auto: Boolean) {
+        val apk = File(app.applicationInfo.sourceDir)
+        val dm = dexMetadata(apk) ?: return
+        runCatching {
+            val result = Intent(app, UpdateResult::class.java).putExtra(EXTRA_WITH_DM, true)
+                .putExtra(EXTRA_SELF, if (auto) SELF_AUTO else SELF_ASKED)
+            val id = commitSession(app, apk, dm, result)
+            Log.i(TAG, "self compile: session $id committed, dex metadata ${dm.size}")
+        }.onFailure {
+            Log.w(TAG, "self compile: no session", it)
+            DiagLog.i("self compile: no session (${it.javaClass.simpleName}: ${it.message})")
+        }
+    }
+
+    /** Writes [file] (and [dm] beside it) into a new install session and commits it; returns its id. */
+    @RequiresApi(28)
+    private fun commitSession(app: Context, file: File, dm: ByteArray?, result: Intent): Int {
         val installer = app.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(app.packageName)
@@ -250,7 +296,6 @@ object Updates {
             // answers STATUS_PENDING_USER_ACTION as before.
             if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
-        val dm = if (withDm) dexMetadata(file) else null
         val id = installer.createSession(params)
         try {
             installer.openSession(id).use { session ->
@@ -264,7 +309,6 @@ object Updates {
                     out.write(dm)
                     session.fsync(out)
                 }
-                val result = Intent(app, UpdateResult::class.java).putExtra(EXTRA_WITH_DM, dm != null)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
                 GuardSetup.noteInstallerOpened(app)
                 session.commit(PendingIntent.getBroadcast(app, id, result, flags).intentSender)
@@ -273,18 +317,11 @@ object Updates {
             runCatching { installer.abandonSession(id) }
             throw e
         }
-        Log.i(TAG, "install session $id committed for ${file.length()} bytes, dex metadata ${dm?.size ?: "none"}")
-        DiagLog.i("update: session $id, dex metadata ${dm?.size ?: "none"}")
-        true
-    }.getOrElse {
-        if (withDm) {
-            Log.w(TAG, "install session with dex metadata failed; without it", it)
-            installBySession(app, file, withDm = false)
-        } else {
-            Log.w(TAG, "no install session; opening the installer", it)
-            openInstaller(app, app, file)
-        }
+        return id
     }
+
+    /** This APK's own dex metadata for this Android, or null (SelfCompile). */
+    internal fun ownDexMetadata(context: Context): ByteArray? = dexMetadata(File(context.applicationInfo.sourceDir))
 
     /**
      * The dex metadata the build put in [apk] for this Android (28.dm for 9 to 11, 31.dm from 12),
@@ -296,20 +333,77 @@ object Updates {
     }.getOrNull()
 
     private const val EXTRA_WITH_DM = "app.orchard.tv.update.WITH_DM"
+    private const val EXTRA_SELF = "app.orchard.tv.update.SELF"
+    private const val SELF_ASKED = 1
+    private const val SELF_AUTO = 2
+
+    /**
+     * The update's session while its confirmation page is awaited, else null. Hisense VIDAA_TV
+     * (Android 9, Amlogic T963, issue #1004) took the session and then showed nothing: no answer
+     * in the log, no confirmation page, Home never paused. Before 1.72 the installer's ACTION_VIEW
+     * worked there. So a session whose page does not come up in time is abandoned for it.
+     */
+    private var awaiting: Awaiting? = null
+    private class Awaiting(val id: Int) { var homeLeft = false; lateinit var check: Runnable }
+    private val main by lazy { Handler(Looper.getMainLooper()) }
+    /** Sessions given up on: their answers, should they still come, are ignored. */
+    private val abandoned = mutableSetOf<Int>()
+
+    /** From the commit to the system's answer; it comes within a second on the TVs at hand. */
+    private const val ANSWER_TIMEOUT_MS = 8_000L
+    /** From starting the confirmation page to Home pausing beneath it. */
+    private const val CONFIRM_TIMEOUT_MS = 4_000L
+
+    /** Unless Home has paused (a page came up) within [ms], [giveUpOnSession]. */
+    private fun awaitSession(app: Context, id: Int, ms: Long, why: String) {
+        awaiting?.let { main.removeCallbacks(it.check) }
+        val a = Awaiting(id)
+        a.check = Runnable { if (awaiting === a && !a.homeLeft) giveUpOnSession(app, id, why) }
+        awaiting = a
+        main.postDelayed(a.check, ms)
+    }
+
+    private fun stopAwaiting(id: Int) {
+        val a = awaiting?.takeIf { it.id == id } ?: return
+        main.removeCallbacks(a.check)
+        awaiting = null
+    }
+
+    private fun giveUpOnSession(app: Context, id: Int, why: String) {
+        awaiting = null
+        abandoned += id
+        runCatching { app.packageManager.packageInstaller.abandonSession(id) }
+        Log.w(TAG, "$why; abandoned, opening the installer")
+        DiagLog.i("update: $why; abandoned, installer")
+        val file = apkFile(app)
+        if (!file.isFile || !openInstaller(app, app, file)) install = Install.Failed(Failure.Blocked)
+    }
 
     /** The session's answer (UpdateResult): the owner's confirmation, or the installer instead. */
     internal fun onSessionResult(context: Context, intent: Intent) {
         val app = context.applicationContext
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val self = intent.getIntExtra(EXTRA_SELF, 0)
+        if (self != 0) return onSelfResult(app, intent, status, auto = self == SELF_AUTO)
+        val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        if (id in abandoned) {
+            Log.i(TAG, "session $id answered ($status) after it was given up")
+            return
+        }
+        stopAwaiting(id)
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
-                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                runCatching { app.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure {
+                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (confirm == null) return giveUpOnSession(app, id, "session $id asks to confirm but has no page")
+                runCatching { app.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onSuccess {
+                    DiagLog.i("update: session $id asks to confirm; page started")
+                    awaitSession(app, id, CONFIRM_TIMEOUT_MS, "confirmation page of session $id did not come up")
+                }.onFailure {
                     // Some Android 13+ firmware installers have no CONFIRM_INSTALL page but still
                     // take the APK by ACTION_VIEW (issue #827, model not known yet).
                     Log.w(TAG, "could not ask to confirm the update; opening the installer", it)
-                    val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+                    DiagLog.i("update: session $id has no confirmation page (${it.javaClass.simpleName}); installer")
                     if (id >= 0) runCatching { app.packageManager.packageInstaller.abandonSession(id) }
                     val file = apkFile(app)
                     if (!file.isFile || !openInstaller(app, app, file)) install = Install.Failed(Failure.Blocked)
@@ -338,13 +432,37 @@ object Updates {
         }
     }
 
+    /** The answer to [reinstallSelf]: never the installer by ACTION_VIEW, which would carry no metadata. */
+    private fun onSelfResult(app: Context, intent: Intent, status: Int, auto: Boolean) {
+        val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        // Arrives in the new process, once the replace is done.
+        if (status == PackageInstaller.STATUS_SUCCESS) {
+            DiagLog.i("self compile: installed, odex ${SelfCompile.odexBytes(app)?.div(1024)} KB")
+            return
+        }
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION && !auto) {
+            @Suppress("DEPRECATION")
+            val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+            if (confirm != null && runCatching { app.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+        }
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION && id >= 0) runCatching { app.packageManager.packageInstaller.abandonSession(id) }
+        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        Log.w(TAG, "self compile: not installed ($status, $message)")
+        DiagLog.i("self compile: not installed ($status, $message)")
+    }
+
     /** Resume failed checks; if the installer closed without replacing Aerial, reset its button. */
     fun onHomeResumed() {
         checker?.setActive(true)
+        // Back from the confirmation page without an answer: the button works again.
+        awaiting?.takeIf { it.homeLeft }?.let { stopAwaiting(it.id) }
         if (install == Install.Opened) install = Install.Idle
     }
 
-    fun onHomePaused() { checker?.setActive(false) }
+    fun onHomePaused() {
+        checker?.setActive(false)
+        awaiting?.homeLeft = true
+    }
 
     /** Back to the button, when the update page is left. */
     fun resetInstall() {

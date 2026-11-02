@@ -113,3 +113,13 @@ TCL Q10L（MT9655，1.67-guard，2026-10-28 报告人实测）：Aerial 的 4K �
 ## 75T7M Pro（MT9655，Android 14）：守护开不起来（#829）
 
 诊断里 `enabled_accessibility_services = null`，`appops` 有 `ACCESS_RESTRICTED_SETTINGS: deny`（APK 是用文件装的）。先 `adb shell appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS allow` 再打开 Aerial，看守护能不能留住；留不住就和雷鸟 T966D5 一样，是固件定时清掉第三方无障碍（见 [ffalcon-t966d5.md](ffalcon-t966d5.md)）。待报告人确认。
+
+## 75T7L Pro（MT9655，Android 14）：standard 当默认桌面（#983）
+
+报告人的 75T7L Pro（`tcl9655_cn_an64-user 14 UTT2.240216.001 AU01`，无 root）上 standard 1.72 是默认桌面，主页键和开机都直接是 Aerial，没有 TCL 桌面闪现：
+
+- `cmd role add-role-holder android.app.role.HOME app.orchard.tv` 和 `cmd package set-home-activity` 都可用，`resolve-activity -c HOME` 解析到 `app.orchard.tv/.MainActivity`。
+- 开机进 Aerial：`settings put system boot_app_componentname app.orchard.tv/.MainActivity`。日志里 `TclBootAppPolicy: boot launcher, just use native process`，TCL 的开机钩子让位。（MT5879 上同样的设置无效，雷鸟 T966D5 上有效。）
+- 屏保：`--ez own_screensaver true` 有效，否则 TCL 每次开机把屏保改回自带的。
+- 应用内更新原来被拒：`W/verifier: fetch signature info from :app.orchard.tv`，接着 `metaData is null,so return false`，`INSTALL_FAILED_VERIFICATION_FAILURE`。签名比的是当前默认桌面（Aerial 自己），能过，只差 `com.tcl.app.type = com.tcl.ui`（逻辑见 [tcl-mt5879-cn.md](tcl-mt5879-cn.md)「安装限制」）。下一版 standard 带上了它，待报告人确认更新能走通。
+

@@ -120,6 +120,9 @@ class ControlCenter(
     private val bootLabel: String?,
     private val clearBoot: () -> Unit,
     private val noInputs: () -> Unit,
+    /** Kids and Elders mode: leaving it (behind the PIN), and back into it. */
+    private val kidsLeave: () -> Unit = {},
+    private val kidsBack: () -> Unit = {},
 ) : Sheet(context, close) {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.pxi(16f), Ui.pxi(16f), Ui.pxi(16f), Ui.pxi(16f)) }
@@ -133,11 +136,34 @@ class ControlCenter(
         })
         panel.addView(col)
         when (page) {
-            CcPage.Main -> main()
+            CcPage.Main -> if (Kids.active) kidsMain() else main()
             CcPage.Boot -> boot()
             CcPage.Inputs -> inputs()
         }
-        focusFirst()
+        // In Kids mode on leaving it, as the full app.
+        focusFirst(if (page == CcPage.Main && Kids.active) 1 else 0)
+    }
+
+    private fun volumeRow(): SliderRow = SliderRow(
+        context,
+        glyph = { if (it <= 0f) Glyph.SpeakerMuted else Glyph.Speaker },
+        read = { audio.getStreamVolume(AudioManager.STREAM_MUSIC) to audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) },
+        write = { audio.setStreamVolume(AudioManager.STREAM_MUSIC, it, AudioManager.FLAG_PLAY_SOUND) },
+        shown = { v, _ -> if (v == 0) context.getString(R.string.cc_muted) else v.toString() },
+    )
+
+    /** Kids and Elders mode's page, as the full app's KidsPage: the time, volume, the day's time left, leaving. */
+    private fun kidsMain() {
+        col.add(context.label(timeText(context), 27.3f, 600, spacingEm = 0.05f))
+        col.add(context.label(dateText(), 13f, 500, Ui.SECONDARY), top = 4f)
+        kidsTimeLine(context)?.let { col.add(context.label(it, 13f, 500, Ui.SECONDARY), top = 6f) }
+        val volume = volumeRow()
+        col.add(volume, top = 12f)
+        val leave = MenuRow(context, Glyph.Shield, context.getString(if (Kids.kind == KidsKind.Kids) R.string.cc_kids_leave else R.string.cc_elders_leave))
+            .apply { action = kidsLeave }
+        col.add(leave, top = 6f)
+        row(volume)
+        row(leave)
     }
 
     private fun main() {
@@ -162,12 +188,21 @@ class ControlCenter(
         val inputs = RoundButton(context, Glyph.Input, context.getString(R.string.cc_inputs)).apply {
             action = {
                 if (SystemIntents.xiaomiInputs(context).isNotEmpty()) goTo(CcPage.Inputs)
+                // The TV's own input list where its remote's key shows one (SystemIntents): the
+                // panel goes away then, as it does for an app; another make's picker keeps it.
+                else if (SystemIntents.openInputsPanel(context)) close()
                 else if (!SystemIntents.openInputPicker(context)) noInputs()
             }
         }
         val netButton = RoundButton(context, netGlyph, context.getString(R.string.cc_network)).apply {
             level = netLevel
-            action = { locked { open(SystemIntents.network(context, netGlyph == Glyph.Ethernet)) } }
+            action = {
+                locked {
+                    // The TV's own network page where its remote's key shows one (SystemIntents).
+                    if (SystemIntents.openNetworkPanel(context)) close()
+                    else open(SystemIntents.network(context, netGlyph == Glyph.Ethernet))
+                }
+            }
         }
         val settings = RoundButton(context, Glyph.Gear, context.getString(R.string.cc_settings)).apply {
             action = {
@@ -187,13 +222,7 @@ class ControlCenter(
         col.add(buttons, top = 12f)
         row(inputs, netButton, settings)
 
-        val volume = SliderRow(
-            context,
-            glyph = { if (it <= 0f) Glyph.SpeakerMuted else Glyph.Speaker },
-            read = { audio.getStreamVolume(AudioManager.STREAM_MUSIC) to audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) },
-            write = { audio.setStreamVolume(AudioManager.STREAM_MUSIC, it, AudioManager.FLAG_PLAY_SOUND) },
-            shown = { v, _ -> if (v == 0) context.getString(R.string.cc_muted) else v.toString() },
-        )
+        val volume = volumeRow()
         col.add(volume, top = 12f)
         row(volume)
 
@@ -217,6 +246,13 @@ class ControlCenter(
             row(brightness)
         }
 
+        // A parent left Kids and Elders mode: one press back into it, no PIN.
+        if (Kids.enabled && Kids.suspended) {
+            val back = MenuRow(context, Glyph.Kids, context.getString(if (Kids.kind == KidsKind.Kids) R.string.cc_kids_back else R.string.cc_elders_back))
+                .apply { action = kidsBack }
+            col.add(back, top = 6f)
+            row(back)
+        }
         val pers = MenuRow(context, Glyph.Photo, context.getString(R.string.cc_personalize)).apply { action = personalize }
         col.add(pers, top = 6f)
         row(pers)
@@ -389,6 +425,7 @@ class Personalize(
     private val onHidden: () -> Unit,
     private val onSaverNow: () -> Unit,
     private val onPin: (Boolean) -> Unit,
+    private val onKids: () -> Unit = {},
 ) : Sheet(context, close) {
     private val col = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -546,6 +583,12 @@ class Personalize(
             choices(R.string.st_pin, null, listOf(false to R.string.st_pin_off, true to R.string.st_pin_on), LiteSettings.pinSet) { on ->
                 if (LiteSettings.pinSet != on) onPin(on)
             }
+            val kids = Chip(context, string(when {
+                !Kids.enabled -> R.string.st_off
+                Kids.kind == KidsKind.Kids -> R.string.kids_kind_kids
+                else -> R.string.kids_kind_elders
+            }), { false }, Glyph.ChevronRight).apply { action = onKids }
+            settingRow(R.string.st_kids, string(R.string.st_kids_hint), listOf(kids))
         }
     }
 

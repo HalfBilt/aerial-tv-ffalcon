@@ -3,6 +3,7 @@ package app.orchard.tv.lite
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.view.KeyEvent
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -15,6 +16,10 @@ import android.provider.Settings
 object SystemIntents {
     fun settings(context: Context): Intent = first(
         context,
+        // Letv (S40 Air and other eUI sets): its own settings, the only one some stripped Letv
+        // firmwares ship — com.android.settings is absent there, so the standard action resolved to
+        // nothing and the panel's gear did nothing (S40 Air, Android 4.3, 2026-11-02).
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.stv.t2.globalsetting", "com.stv.t2.globalsetting.GlobalSettingActivity")),
         Intent("com.xiaomi.mitv.settings.SETTINGS").setComponent(ComponentName("com.xiaomi.mitv.settings", "com.xiaomi.mitv.settings.entry.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.haier.tv.menusetting", "com.haier.tv.menusetting.RootActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings", "com.konka.settingcenter.settings.view.MainSettingsActivity")),
@@ -29,6 +34,10 @@ object SystemIntents {
 
     fun network(context: Context, ethernet: Boolean): Intent = first(
         context,
+        // Letv: the network page is a tab inside its own settings, and com.android.settings is not
+        // installed at all, so Settings.ACTION_WIFI_SETTINGS went nowhere (S40 Air, Android 4.3).
+        // openNetworkPanel shows that page itself where the TV has it.
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.stv.t2.globalsetting", "com.stv.t2.globalsetting.GlobalSettingActivity")),
         *listOfNotNull(hisenseNetworkSettingsIntent(context)).toTypedArray(),
         *listOfNotNull(Intent("com.xiaomi.mitv.settings.ETHERNET_SETTINGS").setPackage("com.xiaomi.mitv.settings").takeIf { ethernet }).toTypedArray(),
         Intent("com.xiaomi.mitv.settings.WIFI_SETTINGS").setComponent(ComponentName("com.xiaomi.mitv.settings", "com.xiaomi.mitv.settings.wifi.MitvWifiActivity")),
@@ -50,7 +59,7 @@ object SystemIntents {
     }
 
     /**
-     * HDMI 1-3 through Xiaomi's player, which takes the port as its `input` number: 23-25, the
+     * HDMI 1-3, AV and the antenna through Xiaomi's player, which takes the port as its `input` number: 23-25 for HDMI, the
      * full app's xiaomiSources. Mi TV 2 (49", Android 4.3) lists no inputs, and its owner opened
      * them this way from another launcher (issue #1094); Mi TV 2 and 3 on Android 5.1 did the same
      * in the full app (#599 #309). Not on boxes, which have the player but no HDMI inputs, and
@@ -66,11 +75,18 @@ object SystemIntents {
             Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "ro.build.characteristics") as String
         }.getOrNull().orEmpty()
         if ("stb" in traits || "mbx" in traits) return emptyList()
-        return (1..3).map { port ->
-            "HDMI $port" to Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY").setComponent(player)
-                .putExtra("input", 22 + port)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
+        fun play(input: Int) = Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY").setComponent(player)
+            .putExtra("input", input)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // AV is 2 and the antenna 1, DTMB its own page where the player has it (MiTV2-49, the
+        // owner's list, issue #1094). VGA (0) is left out: not every Mi TV of these years has one,
+        // and nothing tells which.
+        val dtmb = ComponentName("com.xiaomi.mitv.tvplayer", "com.xiaomi.mitv.tvplayer.dtmb.DTMBActivity")
+        val digital = if (runCatching { context.packageManager.getActivityInfo(dtmb, 0) }.isSuccess) {
+            listOf("DTMB" to Intent("com.xiaomi.mitv.tvplayer.DTMB_PLAY").setComponent(dtmb).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        } else emptyList()
+        return (1..3).map { port -> "HDMI $port" to play(22 + port) } +
+            listOf("AV" to play(2), context.getString(R.string.input_antenna) to play(1)) + digital
     }
 
     /**
@@ -101,13 +117,67 @@ object SystemIntents {
         if (runCatching { pm.queryBroadcastReceivers(skyMovie, 0) }.getOrNull().orEmpty().any { it.activityInfo.exported }) {
             return runCatching { context.sendBroadcast(skyMovie) }.isSuccess
         }
+        // Letv eUI shows its panels on its own remote's keys; its signal source app answers but
+        // never comes up on this firmware (S40 Air, Android 4.3, verified with am broadcast).
+        if (openInputsPanel(context)) return true
         // LeTV eUI's signal source app, back to the input last used (X3-55, Android 5.0.1, the full
         // app's issues #818 #998); not verified on LeTV's Android 4.x.
         val letv = ComponentName("com.stv.signalsourcemanager", "com.stv.signalsourcemanager.MainActivity")
         if (runCatching { pm.getActivityInfo(letv, 0) }.getOrNull()?.exported == true &&
             runCatching { context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(letv).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
         ) return true
+        // Sharp's Foxconn-built MStar source panel (CVTM648, Android 6, the full app's issue #1048).
+        val sharp = ComponentName("com.mstar.tvsetting", "com.foxconn.etvg.inputsource.FxcInputSourceActitvity")
+        if (runCatching { pm.getActivityInfo(sharp, 0) }.getOrNull()?.exported == true &&
+            runCatching { context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(sharp).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+        ) return true
+        // Older Coocaa (Skyworth 8S61, MStar, Android 4.4.2) has none of the above: on the remote's
+        // input key the system starts its launcher's HomeService with the key, which shows the
+        // input page ("HomeService onStartCommand ##, keyCode=178"; issue #1272, the reporter's
+        // logcat). The extra is read from that log and the dex, not tried from an app; last, so
+        // TVs that switch some other way are not touched.
+        val coocaaHome = ComponentName("com.tianci.movieplatform", "com.coocaa.homepage.vast.service.HomeService")
+        if (runCatching { pm.getServiceInfo(coocaaHome, 0) }.getOrNull()?.exported == true) {
+            val key = Intent("coocaa.intent.action.SOURCE_SERVICE").setComponent(coocaaHome)
+                .putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TV_INPUT))
+            if (runCatching { context.startService(key) }.getOrNull() != null) return true
+        }
+        // MStar's own TV player keeps a source panel behind a custom action (Sharp
+        // LCD_xxSFFOC470A, MStar mooney, Android 6, the full app's issue #1342, opened with adb);
+        // not verified on MStar's Android 4.x. Last, so no TV that opened one above changes.
+        val mstar = Intent("com.mstar.tv.tvplayer.ui.intent.action.SOURCE_INFO").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { pm.resolveActivity(mstar, 0)?.activityInfo }.getOrNull()?.exported == true &&
+            runCatching { context.startActivity(mstar) }.isSuccess
+        ) return true
         return false
+    }
+
+    /**
+     * Letv's own network page — 无线网络 / 有线网络 — shown as its remote's network key shows it
+     * (S40 Air, Android 4.3, verified). False where the TV has no such panel, which is where
+     * [network] is the answer.
+     */
+    fun openNetworkPanel(context: Context): Boolean = letvPanel(context, "com.letv.action.network")
+
+    /**
+     * Letv's input list — 模拟电视 / 数字电视 / 视频 / HDMI1 — shown as its remote's source key
+     * shows it (S40 Air, Android 4.3, verified). [openInputPicker] tries it too; a caller that
+     * closes its own panel on success asks first, so it knows which panel it must not close.
+     */
+    fun openInputsPanel(context: Context): Boolean = letvPanel(context, "com.letv.action.source")
+
+    /**
+     * A panel Letv's own settings app shows on a broadcast — its GlobalReceiver takes these, which
+     * are what its remote's network, source and settings keys send — for the stripped firmwares
+     * that ship no com.android.settings at all, so the standard actions lead nowhere, and whose
+     * signal source app resolves but does not come up (S40 Air, Android 4.3, 2026-11-02). False
+     * where nothing listens: no such set, no such panel.
+     */
+    private fun letvPanel(context: Context, action: String): Boolean {
+        val listening = runCatching { context.packageManager.queryBroadcastReceivers(Intent(action).setPackage(LETV_SETTINGS), 0) }
+            .getOrNull().orEmpty().any { it.activityInfo.exported }
+        if (!listening) return false
+        return runCatching { context.sendBroadcast(Intent(action).setPackage(LETV_SETTINGS)) }.isSuccess
     }
 
     /**
@@ -147,6 +217,8 @@ object SystemIntents {
     }
 
     private const val XIAOMI_SETTINGS = "com.xiaomi.mitv.settings"
+    /** LeTV eUI's settings app, which holds the panels its remote's keys show ([letvPanel]). */
+    private const val LETV_SETTINGS = "com.stv.t2.globalsetting"
 
     /** Not Intent.resolveActivity: it returns an explicit component unchecked. */
     private fun first(context: Context, vararg intents: Intent): Intent {

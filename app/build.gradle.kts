@@ -19,11 +19,11 @@ android {
         // Android 5.0. Compose 1.10 and later need 6.0, so the Compose BOM below stays on 1.9.
         minSdk = 21
         targetSdk = 34
-        // 雷鸟/TCL 专用版（个人维护分支）。基线是上游 1.77（versionCode 99），
-        // 我们自己的每次构建把版本号往后加：versionCode = 99xx，versionName = 1.77.x。
+        // 雷鸟/TCL 专用版（个人维护分支）。基线是上游 1.87（versionCode 120），
+        // 我们自己的每次构建把版本号往后加：versionCode = 120xx，versionName = 1.87.x。
         // 这样既不和上游撞号，电视也能用自带检查器认出我们的新版本。
-        versionCode = 9901
-        versionName = "1.77.1"
+        versionCode = 12001
+        versionName = "1.87.1"
         // `./gradlew -Pdiag ...`: a build for one reporter's TV whose logcat shows no app lines;
         // see system/DiagLog.kt.
         val diag = project.hasProperty("diag")
@@ -103,6 +103,8 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // Compose 1.9.5, the last release that runs on Android 5.0 (1.10 raised minSdk to 23).
     val composeBom = platform("androidx.compose:compose-bom:2025.11.01")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")

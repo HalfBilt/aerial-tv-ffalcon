@@ -190,10 +190,16 @@ object SystemProbe {
         pkg in SETTINGS_PACKAGES ||
             context.packageManager.resolveActivity(Intent(Settings.ACTION_SETTINGS), 0)?.activityInfo?.packageName == pkg
 
-    private val SETTINGS_PACKAGES = setOf("com.android.settings", "com.android.tv.settings", "com.xiaomi.mitv.settings", "com.tcl.settings", "com.helios.setting", "com.haier.tv.menusetting")
+    private val SETTINGS_PACKAGES = setOf("com.android.settings", "com.android.tv.settings", "com.xiaomi.mitv.settings", "com.tcl.settings", "com.helios.setting", "com.haier.tv.menusetting", ChanghongSettings.PACKAGE)
+
+    fun settingsTileIntent(context: Context, pkg: String): Intent? =
+        if (pkg in setOf("com.android.settings", "com.android.tv.settings", ChanghongSettings.PACKAGE)) {
+            ChanghongSettings.intent(context)
+        } else null
 
     fun settingsIntent(context: Context): Intent =
-        xgimiSettingsIntent(context, "Settings://com.xgimi.misckey.main/mainPage")
+        ChanghongSettings.intent(context)
+            ?: xgimiSettingsIntent(context, "Settings://com.xgimi.misckey.main/mainPage")
             ?: konkaSettingsIntent(context)
             ?: settingsActivityIntent(context)
 
@@ -286,7 +292,8 @@ object SystemProbe {
      * MiTV-MFTP0 (Android 9) viewer saw "crash" (issue #369); MiTV-MFTR0 has the page too.
      */
     fun networkSettingsIntents(context: Context, ethernet: Boolean = false): List<Intent> =
-        listOfNotNull(xgimiSettingsIntent(context, XGIMI_NETWORK_PAGE)) + networkSettingsActivityIntents(context, ethernet)
+        listOfNotNull(ChanghongSettings.intent(context, ChanghongSettings.NETWORK), xgimiSettingsIntent(context, XGIMI_NETWORK_PAGE)) +
+            networkSettingsActivityIntents(context, ethernet)
 
     private fun networkSettingsActivityIntents(context: Context, ethernet: Boolean = false): List<Intent> {
         val wired = listOfNotNull(Intent("com.xiaomi.mitv.settings.ETHERNET_SETTINGS").setPackage("com.xiaomi.mitv.settings").takeIf { ethernet })
@@ -353,7 +360,7 @@ object SystemProbe {
     }
     private fun xgimiDisplayManagerClass(): Class<*>? = xgimiDisplayManagerClassOnce
 
-    private fun xgimiDisplayManager(): Any? {
+    internal fun xgimiDisplayManager(): Any? {
         val c = xgimiDisplayManagerClass() ?: return null
         return runCatching { c.getMethod("getInstance").invoke(null) }.getOrNull()
             ?: runCatching { c.getDeclaredConstructor().also { it.isAccessible = true }.newInstance() }.getOrNull()
@@ -373,6 +380,9 @@ object SystemProbe {
     fun setXgimiBrightnessLevel(level: Int): Boolean {
         val c = xgimiDisplayManagerClass() ?: return false
         val dm = xgimiDisplayManager() ?: return false
+        // X7 Max's 10+ Boost ignores ordinary DLP writes. Exit only the detected Boost mode;
+        // other XGIMI light engines keep their existing path.
+        if (XgimiBoost.enabled() == true && !XgimiBoost.disable()) return false
         val target = level.coerceIn(1, XGIMI_DLP_LUMENS_MAX)
         return runCatching { c.getMethod("setDlpLumensLevel", java.lang.Byte.TYPE).invoke(dm, target.toByte()) }.isSuccess
     }
@@ -395,6 +405,16 @@ object SystemProbe {
 
     fun startSettingsIntent(context: Context, intent: Intent) {
         if (HisenseSources.open(context, intent)) return
+        if (intent.component == ChanghongSettings.component) {
+            if (ChanghongSettings.open(context, intent)) return
+            val fallback = if (intent.getBooleanExtra(ChanghongSettings.NETWORK, false)) {
+                networkSettingsActivityIntents(context).first()
+            } else {
+                settingsActivityIntent(context)
+            }
+            context.startActivity(settingsLaunchIntent(context, fallback))
+            return
+        }
         if (intent.action == XIAOMI_SETTINGS_POPUP.action && intent.`package` == XIAOMI_SETTINGS_POPUP.`package`) {
             context.sendBroadcast(intent)
             return
@@ -449,6 +469,9 @@ object SystemProbe {
      * found in PR #85; MiTV-MFTP0, Mi TV 4A, #23, #130, #185), and MiTV-MFTR0 has the receiver too.
      */
     fun openPictureSettings(context: Context): Boolean {
+        ChanghongSettings.intent(context, ChanghongSettings.PICTURE)?.let {
+            if (ChanghongSettings.open(context, it)) return true
+        }
         val backlight = Intent("com.xiaomi.mitv.settings.BACKLIGHT_POPUP")
             .setComponent(ComponentName("com.xiaomi.mitv.settings", "com.xiaomi.mitv.settings.SettingsBroadcastReceiver"))
         if (context.packageManager.queryBroadcastReceivers(backlight, 0).any { it.activityInfo.exported }) {
@@ -456,6 +479,18 @@ object SystemProbe {
             if (shown) return true
         }
         if (isInstalled(context, "com.tcl.settings")) {
+            // TCL's picture page first where it has one: on G06 (mt5867, Android 11) SHOW_WINDOW without
+            // an EXTRA_TYPE threw in TCL's ShowWindowService, yet startService returned as if it had
+            // opened, so the page was never tried (PR #1231, checked by its author on that TV). TCL
+            // MT5879 (Android 11) has no PictureActivity and goes on to SHOW_WINDOW as before.
+            val activityShown = runCatching {
+                val intent = Intent(Settings.ACTION_DISPLAY_SETTINGS)
+                    .setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.PictureActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            }.isSuccess
+            if (activityShown) return true
+
             val shown = runCatching {
                 context.startService(Intent("com.tcl.settings.SHOW_WINDOW").setPackage("com.tcl.settings"))
             }.getOrNull() != null
@@ -478,6 +513,11 @@ object SystemProbe {
                     // its brightness one step in; opened by component on the TV (issue #895). Before
                     // the display action, which those TVs answer with the settings' main page.
                     Intent(Intent.ACTION_MAIN).setComponent(TIANCI_PICTURE),
+                    // Hisense VIDAA_TV (75E8H, m7642, Android 9): the picture page, its brightness
+                    // one step in; the display action opens screensaver and calibration there
+                    // (issue #1025, the reporter tried both). Not a standard action, so only where
+                    // a firmware declares it.
+                    Intent("android.settings.IMAGE_SETTINGS"),
                     Intent(Settings.ACTION_DISPLAY_SETTINGS),
                     // PPTV K55U27: picture and sound, where its brightness is (issue #264).
                     Intent("com.pptv.intent.action.PICTUREAUDIO_ACTIVITY")
@@ -499,6 +539,9 @@ object SystemProbe {
      */
     fun openInputPicker(context: Context): Boolean {
         val pm = context.packageManager
+        changhongInputPanel(context)?.let { intent ->
+            if (runCatching { context.startService(intent) }.getOrNull() != null) return true
+        }
         // XGIMI (GMUI): TvInputManager does list the inputs here, but nothing on the firmware answers
         // the passthrough intent they carry - `am start` cannot resolve it - so a source tile and the
         // inputs page of Control Center both end at "this TV does not support it" (issue #241, and
@@ -546,10 +589,52 @@ object SystemProbe {
         if (runCatching { pm.getActivityInfo(LETV_SOURCES, 0) }.getOrNull()?.exported == true &&
             runCatching { context.startActivity(letv) }.isSuccess
         ) return true
+        // Sharp's Foxconn-built MStar firmware (CVTM648, Android 6) lists no inputs either; its own
+        // source panel, the one the remote's input key shows, picks one and switches through
+        // MStar's player (issue #1048, the reporter opened it with adb). Only where it is exported.
+        val sharp = Intent(Intent.ACTION_MAIN).setComponent(FOXCONN_SOURCES).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { pm.getActivityInfo(FOXCONN_SOURCES, 0) }.getOrNull()?.exported == true &&
+            runCatching { context.startActivity(sharp) }.isSuccess
+        ) return true
+        // Older Coocaa with none of the above (Skyworth 8S61, MStar, Android 4.4.2, Aerial Lite's
+        // issue #1272): the system answers the remote's input key by starting its launcher's
+        // HomeService with the key, which shows the input page. The extra is read from the
+        // reporter's logcat and the dex, not tried from an app; last, so no other TV is touched.
+        val coocaaHome = ComponentName("com.tianci.movieplatform", "com.coocaa.homepage.vast.service.HomeService")
+        if (runCatching { pm.getServiceInfo(coocaaHome, 0) }.getOrNull()?.exported == true) {
+            val key = Intent("coocaa.intent.action.SOURCE_SERVICE").setComponent(coocaaHome)
+                .putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_TV_INPUT))
+            if (runCatching { context.startService(key) }.getOrNull() != null) return true
+        }
+        // MStar's own TV player keeps a source panel behind a custom action, on firmware that
+        // registers no inputs with Android (Sharp LCD_xxSFFOC470A, MStar mooney, Android 6: the
+        // reporter opened it with adb, issue #1342). Only an exported one, as `am start` was, and
+        // after every other panel, so no TV that opened one of those changes.
+        val mstar = Intent(MSTAR_SOURCE_INFO).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { pm.resolveActivity(mstar, 0)?.activityInfo }.getOrNull()?.exported == true &&
+            runCatching { context.startActivity(mstar) }.isSuccess
+        ) return true
         return false
     }
 
+    private const val MSTAR_SOURCE_INFO = "com.mstar.tv.tvplayer.ui.intent.action.SOURCE_INFO"
     private val LETV_SOURCES = ComponentName("com.stv.signalsourcemanager", "com.stv.signalsourcemanager.MainActivity")
+    private val FOXCONN_SOURCES = ComponentName("com.mstar.tvsetting", "com.foxconn.etvg.inputsource.FxcInputSourceActitvity")
+
+    /** ChangHong mt5520_ll (Android 5.1): 2001 shows the menu; 3006 also starts the last input. */
+    private fun changhongInputPanel(context: Context): Intent? {
+        val intent = Intent("CH_MENU_SOURCE")
+            .setComponent(ComponentName("com.changhong.SourceMenu", "com.changhong.source.SourceMenuService"))
+            .putExtra("MenuSource", "menuSource")
+            .putExtra("keyCode", 2001)
+        return intent.takeIf {
+            runCatching {
+                val info = context.packageManager.resolveService(it, 0)?.serviceInfo
+                info != null && info.exported && info.enabled && info.applicationInfo.enabled &&
+                    (info.permission.isNullOrEmpty() || context.checkCallingOrSelfPermission(info.permission) == PackageManager.PERMISSION_GRANTED)
+            }.getOrDefault(false)
+        }
+    }
 
     /**
      * TCL's own input panel, where the firmware has one. The remote's input key opens it by itself,
@@ -690,6 +775,7 @@ object SystemProbe {
                     ?: tclPlayer?.takeIf { info.id.startsWith(TCL_INPUTS) }?.let { tclRoute(it, kind, label, hw(info.id)) }
                     ?: generic.takeIf { resolves(context, it) }
                     ?: droidLogicRoute(context, info)
+                    ?: jmgoRoute(context, info)
                     ?: tclPlayer?.let { tclRoute(it, kind, label, hw(info.id)) }
                     ?: generic
                 val device = cec
@@ -757,6 +843,27 @@ object SystemProbe {
                 (activity.permission == null || ContextCompat.checkSelfPermission(context, activity.permission) == PackageManager.PERMISSION_GRANTED)
         }
     }
+
+    /**
+     * JMGO's TV app, for its projectors where nothing answers the passthrough VIEW intent: it tunes
+     * the port named in the "inputSrc" extra (HDMI2, HDMI3), which DroidLogic's service is named
+     * after. JMGO S60 (Amlogic T968, Android 5.1.1): HDMI3 opened, the reporter's patched build and
+     * `am start` (issue #1347).
+     */
+    private fun jmgoRoute(context: Context, info: TvInputInfo): Intent? {
+        if (info.type != TvInputInfo.TYPE_HDMI) return null
+        val port = JMGO_PORT.find(info.id)?.groupValues?.get(1) ?: return null
+        val intent = Intent().setComponent(ComponentName(JMGO_TV, "$JMGO_TV.AmlogicTvActivity"))
+            .putExtra("inputSrc", "HDMI$port")
+        val activity = runCatching { context.packageManager.getActivityInfo(intent.component!!, 0) }.getOrNull() ?: return null
+        return intent.takeIf {
+            activity.exported && activity.enabled && activity.applicationInfo.enabled &&
+                (activity.permission == null || ContextCompat.checkSelfPermission(context, activity.permission) == PackageManager.PERMISSION_GRANTED)
+        }
+    }
+
+    private const val JMGO_TV = "com.jmgo.tv"
+    private val JMGO_PORT = Regex("""\.Hdmi(\d)InputService/""")
 
     private fun resolves(context: Context, intent: Intent) =
         runCatching { context.packageManager.resolveActivity(intent, 0) != null }.getOrDefault(false)

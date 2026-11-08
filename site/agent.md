@@ -123,14 +123,21 @@ curl -fsSL https://aerial.qust.me/install.sh | KEEP_ADB=1 TV=<IP> bash
    adb shell appops set app.orchard.tv AUTO_START allow
    adb shell appops set app.orchard.tv ASSOC_START allow
    ```
+   Android 6、7 没有 `cmd`，部分 Android 8 固件也没有 `cmd notification`（极米 Z6X 第四代报 `No shell command implementation.`）：先运行 `adb shell settings get secure enabled_notification_listeners`。输出是 `null` 或空的，运行 `adb shell settings put secure enabled_notification_listeners app.orchard.tv/app.orchard.tv.guard.RevivalListener`；否则把 `:app.orchard.tv/app.orchard.tv.guard.RevivalListener` 加在原值后面再 `settings put`，原有的不要删。乐视等会在后台强停 App 的固件靠它把 Aerial 拉回来（#1127）。
    最后四条 `appops` 只有 TCL / 雷鸟认（不同固件认其中两条），别的电视报错是正常的。
    `ACCESS_RESTRICTED_SETTINGS` 只有 Android 13 及以上认：用文件装的 App 在这些系统上开不了无障碍，守护会一直被关掉（#811 #829）。
+   TCL / 雷鸟（装有 `com.tcl.ttvs`，或 `adb shell settings get system boot_app_componentname` 已经有值）：先把 `boot_app_mode`、`boot_app_componentname` 两项的原值告诉用户并记下，再运行下面两条，开机第一个画面就是 Aerial，不再先出 TCL 桌面（#1185）。`boot_app_mode` 原来有值就只改第二条：
+   ```
+   adb shell settings put system boot_app_mode boot_launcher
+   adb shell settings put system boot_app_componentname app.orchard.tv/.MainActivity
+   ```
 
    再启动一次 Aerial，等 5 秒后编译（要几十秒，让 Aerial 在电视上更流畅；有的电视要先启动过一次，编译才有效）：
    ```
    adb shell am start -W -n app.orchard.tv/.MainActivity
    adb shell cmd package compile -m speed -f app.orchard.tv
    ```
+   `-f` 在 Android 8 上可能报 `RuntimeException: Can't create handler inside thread that has not called Looper.prepare()`；去掉 `-f` 重跑即可（极米 Z6X 第四代实测，编译结果仍是 `compilation_filter=speed`）。
 
 4. 屏保：运行 `adb shell settings get secure screensaver_enabled`。结果是 `1` 时再运行：
    ```
@@ -237,7 +244,7 @@ adb shell "sleep 8; dumpsys window | grep mCurrentFocus"
 - 第 3 条有 `app.orchard.tv/app.orchard.tv.guard.HomeGuardService`：守护已打开（原生 Android TV 已是默认桌面时可能没有，看第 6 条即可）。
 - 第 4 条大于 0：守护正在运行。
 - **第 6 条包含 `app.orchard.tv`：按主页键进入 Aerial，安装成功。** 这一条不满足，就不能告诉用户装好了。有的固件按主页键后自家桌面要停几秒，守护才把 Aerial 拉回来（OPPO ColorOS TV 约 5 秒，#664）：第 6 条是原桌面时，再运行一次 `adb shell "sleep 5; dumpsys window | grep mCurrentFocus"`，两次都不是 `app.orchard.tv` 才算失败。
-- 第 2、3、6 条的原始输出必须贴给用户，不要只说「成功」。第 2 条报错（老系统没有 `cmd`）时，改用 `adb shell pm resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.DEFAULT`。
+- 第 2、3、6 条的原始输出必须贴给用户，不要只说「成功」。第 2 条报错（老系统没有 `cmd`）时，改用 `adb shell pm resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.DEFAULT`。Android 6 上这两条都可能没有（`cmd: not found`、`pm` 报 `unknown command`，#1127 #1145），那就跳过第 2 条，以第 3、4 条和第 6 条为准；有的老固件上 `input keyevent KEYCODE_HOME` 不经过守护，第 6 条看着失败时请用户用实体遥控器按一次主页键再看。
 
 第 6 条不是 `app.orchard.tv` 时，等 5 秒再运行一次第 5、6 条（有的电视守护启动得慢）。还不是，看「常见情况」。
 
@@ -273,6 +280,9 @@ adb shell appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS default
 adb shell am force-stop app.orchard.tv
 adb shell cmd role remove-role-holder --user 0 android.app.role.HOME app.orchard.tv
 ```
+TCL / 雷鸟改过开机组件的，用记下的原值改回去（原来是空的就写 `''`）：`adb shell settings put system boot_app_componentname <原值>`，`boot_app_mode` 同样。
+
+Android 6、7 没有 `cmd` 时，`disallow_listener` 那条改为：`settings get secure enabled_notification_listeners`，去掉其中 `app.orchard.tv/app.orchard.tv.guard.RevivalListener` 这一项（连同它前面的 `:`）后 `settings put` 回去；只剩它自己时用 `adb shell settings delete secure enabled_notification_listeners`。
 
 然后：
 
@@ -287,6 +297,7 @@ adb shell cmd role remove-role-holder --user 0 android.app.role.HOME app.orchard
 
 - **小米**：`resolve-activity` 仍然显示 PatchWall（`com.mitv.tvhome`）是正常的，由桌面守护接管。千万不要停用 `com.mitv.tvhome`。建议开 `KEEP_ADB`。
 - **小米 Android 9 低内存机型（`adb shell getprop ro.config.low_ram` 是 `true`，比如 MFTP0）**：系统不许任何第三方通知监听，`allow_listener` 没有输出但不生效，这是正常的，不要反复重试。小米待机时会强停 Aerial，1.21 起 Aerial 改由系统的同步服务在强停后约 30–60 秒拉回来，之后守护会把 ADB 也打开。所以待机超过一分钟再唤醒，直接是 Aerial；只待机十几秒就唤醒，会先看到原桌面，最多再等一分钟左右才切回 Aerial。测待机时请待机 1 分钟以上，唤醒后等 30 秒再看结果，不要在这期间按主页键或打开别的 App。1.20 及更早的版本在这类电视上待机后回不来。
+- **极米 Android 8（Z6X 第四代等，2GB、`ro.config.low_ram=true`）**：切到别的 App 后约 15–45 秒 Aerial 会被固件整进程杀掉，守护随之消失且系统不会重新绑定（`enabled_accessibility_services` 里仍留着守护），通知监听在 low_ram 上也不生效；每次开机固件还会把极米桌面重新写成首选桌面。守护活着时主页键正常，被杀后主页键会停在极米桌面：重跑 `set-home-activity`，或从应用列表打开一次 Aerial。开机「应用优化中」（`com.xgimi.upgrade` 的 `AppBootUpdateActivity`）期间内存最紧，Aerial 会被杀掉，优化结束可能停在极米。详见 `docs/devices/xgimi-xk03u-android8.md`。
 - **TCL**：`adb install` 一定失败（`INSTALL_FAILED_VERIFICATION_FAILURE`），按「TCL 安装」走多屏互动。用户没看到电视上的提示时，重新运行一次。
 - **创维（比如 7T631_T60，Android 13）**：`adb install` 报 `INSTALL_FAILED_USER_RESTRICTED` 时，是固件在校验 adb 安装。先用 `adb shell settings get global verifier_verify_adb_installs` 记下原值，再运行 `adb shell settings put global verifier_verify_adb_installs 0`，然后重新安装（macOS / Linux 重新运行一行命令）。装好后把原值写回去（原值是 `null` 时用 `adb shell settings delete global verifier_verify_adb_installs`），以后升级时再关一次。这条来自用户反馈，没有在创维真机上验证过。
 - **雷鸟 55S595C Ultra（MT9655）等只有「无线调试」的机型**：拿不到授权，能装但接管不了主页键。

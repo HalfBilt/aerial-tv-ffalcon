@@ -8,6 +8,7 @@ import struct
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 SCRIPT = Path(os.environ.get('TCAST_SCRIPT', Path(__file__).resolve().parents[1] / 'tcast-push.py'))
@@ -102,6 +103,73 @@ class MainTest(unittest.TestCase):
         result, _, out, err = self.run_main(frame('223>>PROGRESS>>app.orchard.tv>>Aerial>>2>>0'))
         self.assertEqual(result, 1)
         self.assertIn('could not download or install', err)
+
+    def test_refused_install_fails(self):
+        # TCL MT5879 after 同意 on aerial-standard.apk: download to 100, then stage 4 (issue #1163).
+        result, _, out, err = self.run_main(frame('223>>PROGRESS>>app.orchard.tv>>Aerial>>3>>0') + frame('223>>PROGRESS>>app.orchard.tv>>Aerial>>4>>2'))
+        self.assertEqual(result, 1)
+        self.assertIn('refused to install', err)
+        self.assertNotIn('Timed out', err)
+
+
+class ClockTest(unittest.TestCase):
+    def run_wait(self, wall_jump, timeout):
+        elapsed = 0
+        sent = []
+        sock = Mock()
+
+        def receive(_size):
+            nonlocal elapsed
+            elapsed += 1
+            # A deterministic bound keeps regression tests safe on the old wall-clock loop.
+            if elapsed > timeout + 1:
+                self.fail('wait exceeded the timeout after a wall-clock adjustment')
+            raise tcast.socket.timeout()
+
+        sock.recv.side_effect = receive
+        sock.sendall.side_effect = lambda packet: sent.append((elapsed, packet))
+        clock = SimpleNamespace(
+            monotonic=lambda: 42 + elapsed,
+            time=lambda: 1000 + elapsed + (wall_jump if elapsed >= 2 else 0),
+        )
+        args = ['tcast-push.py', 'unused.invalid', 'https://example.invalid/a.apk',
+                'app.orchard.tv', 'Aerial', '97', str(timeout)]
+        err = io.StringIO()
+        with patch.object(tcast.socket, 'create_connection', return_value=sock), \
+                patch.object(tcast, 'time', clock), patch.object(sys, 'argv', args), \
+                contextlib.redirect_stderr(err):
+            result = tcast.main()
+        self.assertEqual(result, 1)
+        self.assertIn('Timed out waiting for the TV.', err.getvalue())
+        sock.close.assert_called_once()
+        return elapsed, [at for at, packet in sent if packet == frame('150>>')]
+
+    def test_normal_timeout(self):
+        elapsed, _ = self.run_wait(0, 3)
+        self.assertEqual(elapsed, 3)
+
+    def test_backward_clock_does_not_extend_timeout(self):
+        elapsed, _ = self.run_wait(-100, 3)
+        self.assertEqual(elapsed, 3)
+
+    def test_forward_clock_does_not_shorten_timeout(self):
+        elapsed, _ = self.run_wait(100, 3)
+        self.assertEqual(elapsed, 3)
+
+    def test_normal_heartbeat(self):
+        elapsed, beats = self.run_wait(0, 13)
+        self.assertEqual(elapsed, 13)
+        self.assertEqual(beats, [6, 12])
+
+    def test_backward_clock_does_not_pause_heartbeat(self):
+        elapsed, beats = self.run_wait(-100, 13)
+        self.assertEqual(elapsed, 13)
+        self.assertEqual(beats, [6, 12])
+
+    def test_forward_clock_does_not_trigger_early_heartbeat(self):
+        elapsed, beats = self.run_wait(100, 13)
+        self.assertEqual(elapsed, 13)
+        self.assertEqual(beats, [6, 12])
 
 if __name__ == '__main__':
     unittest.main()

@@ -123,14 +123,21 @@ Run these in PowerShell, with the adb from step 1. Everything inside `adb shell 
    adb shell appops set app.orchard.tv AUTO_START allow
    adb shell appops set app.orchard.tv ASSOC_START allow
    ```
+   Android 6 and 7 have no `cmd`, and some Android 8 firmwares have no `cmd notification` either (XGIMI Z6X Gen 4 prints `No shell command implementation.`): run `adb shell settings get secure enabled_notification_listeners` first. If it prints `null` or nothing, run `adb shell settings put secure enabled_notification_listeners app.orchard.tv/app.orchard.tv.guard.RevivalListener`; otherwise append `:app.orchard.tv/app.orchard.tv.guard.RevivalListener` to the value and `settings put` that, keeping what was there. Firmwares that force-stop apps in the background, LeTV's among them, rely on it to bring Aerial back (issue #1127).
    The last four app ops exist only on TCL and FFALCON (each firmware knows two of them); elsewhere they fail, which is fine.
    `ACCESS_RESTRICTED_SETTINGS` exists from Android 13 only: there an app installed from a file may not switch its accessibility service on, and Home Guard kept going off (#811 #829).
+   TCL and FFALCON (`com.tcl.ttvs` installed, or `adb shell settings get system boot_app_componentname` already has a value): tell the user the current values of `boot_app_mode` and `boot_app_componentname` and note them, then run the two lines below. Aerial is then the first screen after power-on, with no TCL launcher first (#1185). If `boot_app_mode` already has a value, run the second line only:
+   ```
+   adb shell settings put system boot_app_mode boot_launcher
+   adb shell settings put system boot_app_componentname app.orchard.tv/.MainActivity
+   ```
 
    Start Aerial once, wait 5 seconds, then compile it (takes up to a minute and makes Aerial run smoothly on the TV; on some TVs the compile only works after Aerial has started once):
    ```
    adb shell am start -W -n app.orchard.tv/.MainActivity
    adb shell cmd package compile -m speed -f app.orchard.tv
    ```
+   On Android 8, `-f` may fail with `RuntimeException: Can't create handler inside thread that has not called Looper.prepare()`; run the same line without `-f` (tested on XGIMI Z6X Gen 4, still gives `compilation_filter=speed`).
 
 4. Screensaver: run `adb shell settings get secure screensaver_enabled`. If it prints `1`, also run:
    ```
@@ -237,7 +244,7 @@ adb shell "sleep 8; dumpsys window | grep mCurrentFocus"
 - Line 3 includes `app.orchard.tv/app.orchard.tv.guard.HomeGuardService`: Home Guard is on. (On stock Android TV, where Aerial is already the default home screen, it may not be; line 6 decides.)
 - Line 4 is above 0: Home Guard is running.
 - **Line 6 includes `app.orchard.tv`: Home leads to Aerial and the install worked.** Don't tell the user it's installed until it does. On some firmwares the stock launcher stays a few seconds after Home before Home Guard brings Aerial back (about 5 s on OPPO ColorOS TV, #664): if line 6 shows the stock launcher, run `adb shell "sleep 5; dumpsys window | grep mCurrentFocus"` once more, and only call it a failure when neither shows `app.orchard.tv`.
-- Paste the raw output of lines 2, 3 and 6 to the user, not just "success". If line 2 errors on an old system without `cmd`, run `adb shell pm resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.DEFAULT` instead.
+- Paste the raw output of lines 2, 3 and 6 to the user, not just "success". If line 2 errors on an old system without `cmd`, run `adb shell pm resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.DEFAULT` instead. On Android 6 neither may exist (`cmd: not found`, `pm` says `unknown command`; issues #1127 #1145): then skip line 2 and go by lines 3, 4 and 6. On some old firmwares `input keyevent KEYCODE_HOME` does not pass the guard; if line 6 looks wrong, ask the user to press Home once on the real remote and look again.
 
 If line 6 shows something else, wait 5 seconds and run lines 5 and 6 again (Home Guard starts slowly on some TVs). If it still does, see "Common cases".
 
@@ -273,6 +280,9 @@ adb shell appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS default
 adb shell am force-stop app.orchard.tv
 adb shell cmd role remove-role-holder --user 0 android.app.role.HOME app.orchard.tv
 ```
+On TCL and FFALCON where the power-on app was changed, put back the values noted (`''` for an empty one): `adb shell settings put system boot_app_componentname <old value>`, and `boot_app_mode` the same way.
+
+On Android 6 and 7 without `cmd`, replace the `disallow_listener` line: `settings get secure enabled_notification_listeners`, take `app.orchard.tv/app.orchard.tv.guard.RevivalListener` (and the `:` before it) out of the value and `settings put` the rest; if it was the only one, `adb shell settings delete secure enabled_notification_listeners`.
 
 Then:
 
@@ -287,6 +297,7 @@ Then:
 
 - **Xiaomi**: `resolve-activity` still names PatchWall (`com.mitv.tvhome`); that's expected, Home Guard takes over. Never disable `com.mitv.tvhome`. `KEEP_ADB` is recommended.
 - **Xiaomi on Android 9 with low RAM (`adb shell getprop ro.config.low_ram` prints `true`, e.g. MFTP0)**: Android allows no third-party notification listener there, so `allow_listener` prints nothing and does nothing. That is expected; don't keep retrying. Xiaomi force-stops Aerial at standby; from 1.21 Android's sync service brings Aerial back about 30-60 seconds after the stop, and Home Guard then turns ADB back on. Woken after more than a minute, the TV shows Aerial straight away; woken after a few seconds, it shows the stock launcher first and switches to Aerial within about a minute. To test standby, stay in standby for over a minute and look 30 seconds after waking, without pressing Home or opening an app meanwhile. 1.20 and earlier do not come back after standby on these TVs.
+- **XGIMI on Android 8 (Z6X Gen 4 and similar, 2 GB, `ro.config.low_ram=true`)**: about 15–45 s after another app comes to the front, the firmware kills Aerial's whole process; the guard goes with it and Android does not bind it again (`enabled_accessibility_services` still lists it), and the notification listener does not work on low-RAM. The firmware also re-registers its own Home as the preferred Home at every boot. Home works while the guard is alive; once the process is killed, Home stays on the XGIMI launcher: run `set-home-activity` again or open Aerial once from the app list. During the boot-time "app optimizing" screen (`com.xgimi.upgrade`'s `AppBootUpdateActivity`) memory is tightest, Aerial is killed, and the TV may stay on the XGIMI launcher. See `docs/devices/xgimi-xk03u-android8.md`.
 - **TCL**: `adb install` always fails (`INSTALL_FAILED_VERIFICATION_FAILURE`); use 多屏互动 as in "TCL". If the user didn't see the prompt on the TV, run it again.
 - **Skyworth (e.g. 7T631_T60, Android 13)**: when `adb install` fails with `INSTALL_FAILED_USER_RESTRICTED`, the firmware is verifying adb installs. Note the current value with `adb shell settings get global verifier_verify_adb_installs`, run `adb shell settings put global verifier_verify_adb_installs 0`, then install again (on macOS / Linux, run the one-liner again). Afterwards put the old value back (if it was `null`, `adb shell settings delete global verifier_verify_adb_installs`), and turn it off again for each update. This comes from a user's report; it has not been checked on a Skyworth here.
 - **TVs with only Wireless debugging** (FFALCON 55S595C Ultra, MT9655): adb can't be authorized there, so Aerial installs but can't take over Home.

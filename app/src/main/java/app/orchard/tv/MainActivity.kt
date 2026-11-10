@@ -18,6 +18,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -77,6 +78,7 @@ import app.orchard.tv.apps.SOURCE_KEY_PREFIX
 import app.orchard.tv.wallpaper.PhoneServer
 import app.orchard.tv.wallpaper.Wallpapers
 import app.orchard.tv.system.BootOpen
+import app.orchard.tv.system.CecSwitch
 import app.orchard.tv.system.DiagLog
 import app.orchard.tv.system.FrameStats
 import app.orchard.tv.wallpaper.AerialFormats
@@ -122,6 +124,15 @@ class MainActivity : ComponentActivity() {
             Wallpapers.rotateIfDue()
         }
     }
+
+    /**
+     * Each minute while Home is in front: "My Photos, in turn" with a short interval moves on
+     * (issue #1314). Registered only while resumed; a check that is not due does nothing.
+     */
+    private val minuteReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = Wallpapers.rotateIfDue()
+    }
+    private var minuteReceiverOn = false
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = runOnUiThread {
@@ -261,6 +272,8 @@ class MainActivity : ComponentActivity() {
         FontWarmup.start(this)
         val uhd = UhdCanvas.scale(this)
         Wallpapers.init(this)
+        // A receiver may have started the wallpapers with the app's size; Home's window is the one.
+        Wallpapers.fitScreen(this)
         Weather.init(this)
         Updates.init(this)
         lifecycleScope.launch(Dispatchers.IO) { SelfCompile.init(this@MainActivity) }
@@ -983,9 +996,21 @@ class MainActivity : ComponentActivity() {
         resumeWork()
     }
 
+    /** The screen turned (to portrait, #1416) or resized: pictures follow the window's new shape. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (realStarted) Wallpapers.fitScreen(this)
+    }
+
     /** What onResume does once the user is unlocked; also run by a start that was locked before. */
     private fun resumeWork() {
         vm.resumed = true
+        CecSwitch.register(this)
+        if (!minuteReceiverOn) {
+            // TIME_TICK is a protected system broadcast; it is only delivered to registered receivers.
+            ContextCompat.registerReceiver(this, minuteReceiver, IntentFilter(Intent.ACTION_TIME_TICK), ContextCompat.RECEIVER_NOT_EXPORTED)
+            minuteReceiverOn = true
+        }
         KidsWatch.homeInFront = true
         idleHandler.removeCallbacks(endHomeBounce)
         vm.homeBounce = false
@@ -1033,6 +1058,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         if (locked) return
         vm.resumed = false
+        if (minuteReceiverOn) { runCatching { unregisterReceiver(minuteReceiver) }; minuteReceiverOn = false }
         KidsWatch.homeInFront = false
         Updates.onHomePaused()
         DiagLog.i("onPause")

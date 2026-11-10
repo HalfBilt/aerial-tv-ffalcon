@@ -19,11 +19,11 @@ android {
         // Android 5.0. Compose 1.10 and later need 6.0, so the Compose BOM below stays on 1.9.
         minSdk = 21
         targetSdk = 34
-        // 雷鸟/TCL 专用版（个人维护分支）。基线是上游 1.88（versionCode 123），
-        // 我们自己的每次构建把版本号往后加：versionCode = 123xx，versionName = 1.88.x。
+        // 雷鸟/TCL 专用版（个人维护分支）。基线是上游 1.90（versionCode 128），
+        // 我们自己的每次构建把版本号往后加：versionCode = 128xx，versionName = 1.90.x。
         // 这样既不和上游撞号，电视也能用自带检查器认出我们的新版本。
-        versionCode = 12301
-        versionName = "1.88.1"
+        versionCode = 12801
+        versionName = "1.90.1"
         // `./gradlew -Pdiag ...`: a build for one reporter's TV whose logcat shows no app lines;
         // see system/DiagLog.kt.
         val diag = project.hasProperty("diag")

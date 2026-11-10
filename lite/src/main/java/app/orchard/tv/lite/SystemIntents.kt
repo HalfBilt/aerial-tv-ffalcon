@@ -28,6 +28,8 @@ object SystemIntents {
         Intent(Settings.ACTION_SETTINGS),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting", "com.konka.systemsetting.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
+        // TCL 50P8 (MStar m7221): the main activity in the package root, as in the full app (#1405).
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.pptv.setting", "com.pptv.setting.root.SettingsActivity")),
         Intent(Intent.ACTION_VIEW, Uri.parse("Settings://com.xgimi.misckey.main/mainPage")),
     )
@@ -46,6 +48,8 @@ object SystemIntents {
         Intent("com.pptv.intent.action.WIFI_ACTIVITY").setComponent(ComponentName("com.pptv.setting", "com.pptv.setting.wifi.WifiWorkActivity")),
         Intent(Settings.ACTION_SETTINGS),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
+        Intent("android.intent.action.WIFISETTING").setPackage("com.tcl.settings"),
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.MainActivity")),
     )
 
     // Same OEM network category as SystemProbe (#760), not the direct Wi-Fi list.
@@ -131,6 +135,12 @@ object SystemIntents {
         if (runCatching { pm.getActivityInfo(sharp, 0) }.getOrNull()?.exported == true &&
             runCatching { context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(sharp).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
         ) return true
+        // Skyworth 42X5 (8S40, Android 4.4.4, issue #1419): the framework turns the remote's input
+        // key into a "com.android.sky.SendHotKey" broadcast that ccosservice's exported HotKeyReceiver
+        // answers with the input panel, reading the key from EXTRA_KEY_EVENT (the reporter's
+        // logcat). Its HomeService below is there but ignores the key, so this goes first; sent only
+        // to an exported receiver for it, as the firmware sends it, and not yet tried from an app.
+        if (sendSkyHotKey(context)) return true
         // Older Coocaa (Skyworth 8S61, MStar, Android 4.4.2) has none of the above: on the remote's
         // input key the system starts its launcher's HomeService with the key, which shows the
         // input page ("HomeService onStartCommand ##, keyCode=178"; issue #1272, the reporter's
@@ -150,6 +160,15 @@ object SystemIntents {
             runCatching { context.startActivity(mstar) }.isSuccess
         ) return true
         return false
+    }
+
+    private fun sendSkyHotKey(context: Context): Boolean {
+        val probe = Intent("com.android.sky.SendHotKey")
+        val receiver = runCatching { context.packageManager.queryBroadcastReceivers(probe, 0) }.getOrNull().orEmpty()
+            .firstOrNull { it.activityInfo.exported && it.activityInfo.enabled }?.activityInfo ?: return false
+        val key = Intent(probe).setComponent(ComponentName(receiver.packageName, receiver.name))
+            .putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TV_INPUT))
+        return runCatching { context.sendBroadcast(key) }.isSuccess
     }
 
     /**

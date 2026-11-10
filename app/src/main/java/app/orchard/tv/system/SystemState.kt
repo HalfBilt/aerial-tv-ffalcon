@@ -257,6 +257,9 @@ object SystemProbe {
                 "com.android.settings", "com.asu.settings.TvMainActivity")),
             // TCL MT5879 (China): nothing answers ACTION_SETTINGS; MAIN opens TCL's full settings panel.
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
+            // TCL 50P8 (sugarcane_mi, MStar m7221, Android 8): neither of those; its settings app's
+            // main activity sits in the package root (issue #1405, the reporter's dumpsys).
+            Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.MainActivity")),
             // PPTV K55U27 (MStar, Android 6): its settings app answers no standard action (issue #264).
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.pptv.setting", "com.pptv.setting.root.SettingsActivity")),
             // XGIMI GMUI (Z7X, Android 9) neither; its settings open by link (issue #241).
@@ -310,6 +313,9 @@ object SystemProbe {
             Intent(Settings.ACTION_SETTINGS),
             // TCL tcl_m7642 (Android 9) answers neither Wi-Fi nor settings actions (issue #15).
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
+            // TCL 50P8 (sugarcane_mi, Android 8) answers only its own Wi-Fi action (issue #1405).
+            Intent("android.intent.action.WIFISETTING").setPackage("com.tcl.settings"),
+            Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.MainActivity")),
             WHALEY_SETTINGS,
         )
     }
@@ -596,6 +602,18 @@ object SystemProbe {
         if (runCatching { pm.getActivityInfo(FOXCONN_SOURCES, 0) }.getOrNull()?.exported == true &&
             runCatching { context.startActivity(sharp) }.isSuccess
         ) return true
+        // Skyworth 42X5 (8S40, Android 4.4.4, Aerial Lite's issue #1419): the framework turns the
+        // remote's input key into a "com.android.sky.SendHotKey" broadcast that ccosservice's exported
+        // HotKeyReceiver answers with the input panel, reading the key from EXTRA_KEY_EVENT (the
+        // reporter's logcat). Its HomeService below is there but ignores the key, so this goes first;
+        // sent only to an exported receiver for it, and not yet tried from an app.
+        val skyHotKey = Intent("com.android.sky.SendHotKey")
+        runCatching { pm.queryBroadcastReceivers(skyHotKey, 0) }.getOrNull().orEmpty()
+            .firstOrNull { it.activityInfo.exported && it.activityInfo.enabled }?.activityInfo?.let { r ->
+                val key = Intent(skyHotKey).setComponent(ComponentName(r.packageName, r.name))
+                    .putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_TV_INPUT))
+                if (runCatching { context.sendBroadcast(key) }.isSuccess) return true
+            }
         // Older Coocaa with none of the above (Skyworth 8S61, MStar, Android 4.4.2, Aerial Lite's
         // issue #1272): the system answers the remote's input key by starting its launcher's
         // HomeService with the key, which shows the input page. The extra is read from the
@@ -702,6 +720,7 @@ object SystemProbe {
         .let { listed -> (listed + xiaomiSources(context, listed)).sortedWith(compareBy({ it.kind.ordinal }, { it.label })) }
         .ifEmpty { XgimiMstarSources.load(context) }
         .ifEmpty { HisenseSources.load(context) }
+        .ifEmpty { VidaaSiloSources.load(context) }
         .ifEmpty { KonkaSources.load(context) }
         .ifEmpty { tclSources(context) }
         .ifEmpty { whaleySources(context) }

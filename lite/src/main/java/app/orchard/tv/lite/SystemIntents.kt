@@ -16,6 +16,11 @@ import android.provider.Settings
 object SystemIntents {
     fun settings(context: Context): Intent = first(
         context,
+        // TCL MS901 / Android 4.2.1 (MStar edison): this firmware's settings app is
+        // com.tcl.mstar.settings; none of the pages below exist on it. Only where its two
+        // activities are present (TclMs901Pages) do they go first; elsewhere this spreads an
+        // empty array and the original list, in its original order, decides as before.
+        *TclMs901Pages.settings(context),
         // Letv (S40 Air and other eUI sets): its own settings, the only one some stripped Letv
         // firmwares ship — com.android.settings is absent there, so the standard action resolved to
         // nothing and the panel's gear did nothing (S40 Air, Android 4.3, 2026-11-02).
@@ -25,6 +30,8 @@ object SystemIntents {
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings", "com.konka.settingcenter.settings.view.MainSettingsActivity")),
         // Hisense VIDAA_TV: its own page before AOSP's, as in the full app (#1085).
         Intent(Settings.ACTION_SETTINGS).setComponent(ComponentName("com.android.tv.settings", "com.hisense.systemsettings.MainActivity")),
+        // LeTV Max4-55 (Android 6): its own settings before AOSP's empty page, as in the full app (#1528).
+        Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.stv.globalsetting", "com.stv.globalsetting.activity.SettingActivity")),
         Intent(Settings.ACTION_SETTINGS),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting", "com.konka.systemsetting.MainActivity")),
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.tcl.settings", "com.tcl.settings.ui.MainActivity")),
@@ -36,6 +43,10 @@ object SystemIntents {
 
     fun network(context: Context, ethernet: Boolean): Intent = first(
         context,
+        // TCL MS901 / Android 4.2.1 (MStar edison): its network page is a separate activity in
+        // com.tcl.mstar.settings, and no standard Wi-Fi/SETTINGS action resolves on this set.
+        // Empty on every other TV, which keeps the original candidates below untouched.
+        *TclMs901Pages.network(context),
         // Letv: the network page is a tab inside its own settings, and com.android.settings is not
         // installed at all, so Settings.ACTION_WIFI_SETTINGS went nowhere (S40 Air, Android 4.3).
         // openNetworkPanel shows that page itself where the TV has it.
@@ -137,10 +148,20 @@ object SystemIntents {
         ) return true
         // Skyworth 42X5 (8S40, Android 4.4.4, issue #1419): the framework turns the remote's input
         // key into a "com.android.sky.SendHotKey" broadcast that ccosservice's exported HotKeyReceiver
-        // answers with the input panel, reading the key from EXTRA_KEY_EVENT (the reporter's
-        // logcat). Its HomeService below is there but ignores the key, so this goes first; sent only
-        // to an exported receiver for it, as the firmware sends it, and not yet tried from an app.
+        // answers with the input panel, the key in an int extra "specialKey" (the reporter read it
+        // from the firmware's PhoneWindowManager and brought the panel up with am broadcast; 1.24's
+        // KeyEvent in EXTRA_KEY_EVENT reached the receiver and was ignored). Its HomeService below
+        // is there but ignores the key, so this goes first; sent only to an exported receiver.
         if (sendSkyHotKey(context)) return true
+        // Baofeng TV (Android 4.4, issue #1225): the remote's source key is the broadcast
+        // "baofengtv.action.SOURCE_SWITCH", which the system app BFTVSourceSwitch's exported
+        // TVEventReceiver answers with its source overlay (read from the APK the reporter sent;
+        // its own launcher entry sends just this). Only where that receiver is there and exported.
+        val baofeng = Intent("baofengtv.action.SOURCE_SWITCH")
+            .setComponent(ComponentName("com.baofengtv.sourceswitch", "com.baofengtv.sourceswitch.receiver.TVEventReceiver"))
+        if (runCatching { pm.queryBroadcastReceivers(baofeng, 0) }.getOrNull().orEmpty().any { it.activityInfo.exported } &&
+            runCatching { context.sendBroadcast(baofeng) }.isSuccess
+        ) return true
         // Older Coocaa (Skyworth 8S61, MStar, Android 4.4.2) has none of the above: on the remote's
         // input key the system starts its launcher's HomeService with the key, which shows the
         // input page ("HomeService onStartCommand ##, keyCode=178"; issue #1272, the reporter's
@@ -152,6 +173,12 @@ object SystemIntents {
                 .putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TV_INPUT))
             if (runCatching { context.startService(key) }.getOrNull() != null) return true
         }
+        // MStar tvsetting's input list, the panel the remote's input key shows (Philips TV838,
+        // Android 6, the full app's issue #1580); not verified on MStar's Android 4.x.
+        val mstarList = ComponentName("com.mstar.tvsetting", "com.mstar.tvsetting.hotkey.InputSourceListViewActivity")
+        if (runCatching { pm.getActivityInfo(mstarList, 0) }.getOrNull()?.exported == true &&
+            runCatching { context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(mstarList).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+        ) return true
         // MStar's own TV player keeps a source panel behind a custom action (Sharp
         // LCD_xxSFFOC470A, MStar mooney, Android 6, the full app's issue #1342, opened with adb);
         // not verified on MStar's Android 4.x. Last, so no TV that opened one above changes.
@@ -167,7 +194,7 @@ object SystemIntents {
         val receiver = runCatching { context.packageManager.queryBroadcastReceivers(probe, 0) }.getOrNull().orEmpty()
             .firstOrNull { it.activityInfo.exported && it.activityInfo.enabled }?.activityInfo ?: return false
         val key = Intent(probe).setComponent(ComponentName(receiver.packageName, receiver.name))
-            .putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TV_INPUT))
+            .putExtra("specialKey", KeyEvent.KEYCODE_TV_INPUT)
         return runCatching { context.sendBroadcast(key) }.isSuccess
     }
 
@@ -241,8 +268,20 @@ object SystemIntents {
 
     /** Not Intent.resolveActivity: it returns an explicit component unchecked. */
     private fun first(context: Context, vararg intents: Intent): Intent {
-        val pm = context.packageManager
-        return (intents.firstOrNull { runCatching { pm.resolveActivity(it, 0) }.getOrNull() != null } ?: intents.last())
+        return (intents.firstOrNull { startable(context, it) } ?: intents.last())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /**
+     * Resolves to an activity Lite may start: exported, any permission it asks for held. Haier's
+     * settings resolve on Huanglong firmware but ask for a signature permission, and the start
+     * threw (full app, issue #1388).
+     */
+    private fun startable(context: Context, intent: Intent): Boolean {
+        val info = runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo }.getOrNull() ?: return false
+        if (info.packageName == context.packageName) return true
+        if (!info.exported) return false
+        val permission = info.permission ?: return true
+        return context.checkCallingOrSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 }

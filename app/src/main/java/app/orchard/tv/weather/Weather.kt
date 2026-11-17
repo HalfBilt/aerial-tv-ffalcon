@@ -18,6 +18,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.io.IOException
+import java.net.SocketTimeoutException
 import javax.net.ssl.SSLException
 import kotlin.math.roundToInt
 
@@ -39,7 +41,8 @@ object Weather {
     private const val TAG = "AerialWeather"
     private const val PREFS = "weather"
     private const val REFRESH_MS = 60 * 60 * 1000L
-    private const val RETRY_MS = 10 * 60 * 1000L
+    /** After a failed reading; only checked when Home comes to the front (issue #1576). */
+    private const val RETRY_MS = 3 * 60 * 1000L
     private const val RELOCATE_MS = 24 * 60 * 60 * 1000L
     /** A reading older than this is not shown at all. */
     private const val STALE_MS = 3 * 60 * 60 * 1000L
@@ -87,16 +90,35 @@ object Weather {
         if (since >= REFRESH_MS || (failed && (networkCameUp || since >= RETRY_MS))) refresh()
     }
 
+    private var lastResult = "none"
+
+    /**
+     * For the diagnostics report: weather gone after an update and back only once Aerial was
+     * restarted, with nothing in the log (MiTV-MFTR0 1.86 -> 1.96 and Xiaomi TV 2, issue #1506).
+     * No place name or coordinates: the report is posted in public.
+     */
+    fun diagnostics(): String {
+        if (!started) return "not started in this process"
+        fun ago(at: Long) = if (at == 0L) "never" else "${(System.currentTimeMillis() - at) / 60_000} min ago"
+        return "shown=${now != null} chosen=$chosen located=${!prefs.getFloat("lat", Float.NaN).isNaN()}; " +
+            "read ${ago(prefs.getLong("fetched_at", 0))}; attempt ${ago(lastAttempt)}, result=$lastResult, " +
+            "inFlight=${job?.isActive == true}"
+    }
+
     private fun refresh() {
         lastAttempt = System.currentTimeMillis()
+        lastResult = "pending"
         job?.cancel()
         job = scope.launch {
+            var why: String? = null
             val reading = withContext(Dispatchers.IO) {
-                runCatching { fetch() }.onFailure { Log.w(TAG, "weather unavailable", it) }.getOrNull()
+                runCatching { fetch() }.onFailure { Log.w(TAG, "weather unavailable", it); why = reasonOf(it) }.getOrNull()
             }
             prefs.getString("place", null)?.let { place = it }
             failed = reading == null
+            lastResult = if (reading != null) "success" else "failed ($why)"
             if (reading != null) {
+                Log.i(TAG, "weather read")
                 now = reading
                 prefs.edit {
                     putLong("fetched_at", System.currentTimeMillis())
@@ -109,6 +131,15 @@ object Weather {
             }
         }
     }
+
+    /**
+     * Why a reading failed, for the diagnostics: the HTTP status or the exception's kind, never its
+     * message, which can hold the URL and so the coordinates. Two 1.97 reports showed only
+     * "failed" for hours while our TVs read the weather (issues #1538 #1548).
+     */
+    private fun reasonOf(e: Throwable): String = (e as? HttpStatus)?.message ?: e.javaClass.simpleName
+
+    private class HttpStatus(code: Int) : java.io.IOException("HTTP $code")
 
     /** Off the main thread. */
     private fun fetch(): WeatherNow {
@@ -263,11 +294,15 @@ object Weather {
 
     /**
      * Android before 7.1 does not trust the Let's Encrypt root these hosts use; they answer the
-     * same over plain HTTP (allowed for them in network_security_config.xml).
+     * same over plain HTTP (allowed for them in network_security_config.xml). A handshake that
+     * never answers goes the same way: MiTV-MFTR0 on 1.98 timed out in the TLS handshake to
+     * open-meteo for hours, while a PC on the same network read it in a second (issue #1576, also
+     * #1555 #1487 #1538).
      */
     private fun get(url: String): String = try {
         read(url)
-    } catch (e: SSLException) {
+    } catch (e: IOException) {
+        if (e !is SSLException && e !is SocketTimeoutException) throw e
         read(url.replaceFirst("https://", "http://"))
     }
 
@@ -276,6 +311,8 @@ object Weather {
         c.connectTimeout = 8_000
         c.readTimeout = 10_000
         return try {
+            val code = c.responseCode
+            if (code !in 200..299) throw HttpStatus(code)
             c.inputStream.use { it.readBytes().decodeToString() }
         } finally {
             c.disconnect()

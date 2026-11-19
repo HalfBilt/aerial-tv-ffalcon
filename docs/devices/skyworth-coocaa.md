@@ -164,6 +164,8 @@ Aerial 1.69 standard 版，固件 `TQ1A.230205.002 / eng.www-da.20260205.170347`
 - 7AA49_D4：第三方 App 能执行 `setprop` 写这几个属性；`adb install -r` 后酷开清掉本包的无障碍登记；`com.coocaa.*` 包名会被 SkyProcManager 放过。
 - 65G650P：第三方收不到 `BOOT_COMPLETED`；`pm install` 报 `INSTALL_FAILED_USER_RESTRICTED`，要用 `cmd package install-create/write/commit` 会话装；`cmd notification allow_listener` 报 No shell command implementation，用 `settings put secure enabled_notification_listeners`。
 - 报告人的办法是改包名或多装一个「壳」App 占住 `model.*`，都和原则冲突（只装 Aerial 自己、不冒充厂商包名），Aerial 不做。
+- 9S67_G30（sky8S34 / m7221，Android 8.0，固件 022.008.220，#1600）：`bootintent.xml` 的 `modelhome` 和 #894 一样，属性指向 Aerial 后那次开机全程没出酷开桌面，约 24 秒后被固件清空，下次又回到「酷开桌面 → Aerial」。`filterHomeAlways` 实测主页键不闪、按住音量正常（同 #1462 8R39_K5C）。
+- 8R720_P7F（85P7F，rtd2885p，安卓 13，#1589）：主页键由 `com.tianci.system` 按 `persist.service.homepage.pkg/.cls` 启动，指向 Aerial 就不闪、音量正常，冷启动后被固件改回；`home_component` 不读。
 
 ## 9S89_S8A（MStar，安卓 6.0 / CCOS）：假待机唤醒后 Aerial 回不来（#1173，报告人实测）
 
@@ -204,3 +206,9 @@ Aerial 是默认桌面、守护绑定，主页键正常；但重启后一分钟�
 ## 8H57_H5（Hi3751V551，安卓 5.1.1，#1518）、8R720_P7F / 8R710_A6E（安卓 13，#1427）：Aerial 是默认桌面仍闪酷开桌面
 
 酷开固件按主页键照样直接启动自家桌面，守护事后拉回，约 0.2–0.5 秒。1.95 起 `filterHomeAlways` 在 Aerial 是默认桌面时也开过滤（#1462），可以试；代价是有的机型按住音量只走一格。开机：解锁后先等 1.5 秒（防止 CEC 切源被打断）再接管，加上冷启动约 3 秒。
+
+## 8R40_G20（RTD2852，安卓 8，#1626，2026-11-19）
+
+- 老年模式下主页键打开 `com.tianci.movieplatform/com.ccos.cooui.movieplatform.ElderMainActivity`，`persist.service.model.cls` 写的就是它（`homepage.cls` 仍是 `HomePageActivity`）。守护把它当原桌面（内置表 + `CoocaaHome.modeScreen`），没真机。
+- 报告人看到固件掉回自家桌面后把 Aerial 的守护从 `enabled_accessibility_services` 里清掉并强停 Aerial，复活没生效；等日志。
+- `set-home-activity` 报 cannot be home，固件用私有类别 `android.intent.category.HOME.CC`。
